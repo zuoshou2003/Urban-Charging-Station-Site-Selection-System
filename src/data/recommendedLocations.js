@@ -1,0 +1,22 @@
+export const recommendedLocations = [
+  { id: 0, longitude: 118.909975, latitude: 31.710789 },
+  { id: 1, longitude: 118.773999, latitude: 31.722073 },
+  { id: 2, longitude: 118.525099, latitude: 31.948821 },
+  { id: 3, longitude: 119.005515, latitude: 31.688033 },
+  { id: 4, longitude: 119.074516, latitude: 32.202482 },
+  { id: 5, longitude: 118.566465, latitude: 32.133519 },
+  { id: 6, longitude: 118.699015, latitude: 31.720365 },
+  { id: 7, longitude: 118.675259, latitude: 32.500979 },
+  { id: 8, longitude: 118.942793, latitude: 32.154172 },
+  { id: 9, longitude: 119.000157, latitude: 31.422481 },
+  { id: 10, longitude: 119.003951, latitude: 31.631947 },
+  { id: 11, longitude: 118.770888, latitude: 32.278403 },
+  { id: 12, longitude: 118.939000, latitude: 32.323597 },
+  { id: 13, longitude: 118.937571, latitude: 31.746835 },
+  { id: 14, longitude: 118.602909, latitude: 31.854083 },
+  { id: 15, longitude: 118.695687, latitude: 31.869565 },
+  { id: 16, longitude: 118.811429, latitude: 32.205057 },
+  { id: 17, longitude: 118.928545, latitude: 32.427632 },
+  { id: 18, longitude: 118.722798, latitude: 32.385969 },
+  { id: 19, longitude: 118.557371, latitude: 31.840788 }
+] 

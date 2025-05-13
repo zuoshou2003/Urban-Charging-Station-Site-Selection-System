@@ -1,0 +1,5040 @@
+<template>
+  <!-- eslint-disable vue/no-deprecated-slot-scope-attribute, vue/no-deprecated-v-bind-sync -->
+  <div class="layout-container">
+    <!-- 顶部标题栏 -->
+    <div class="header">
+      <div class="logo">
+        <el-icon><Location /></el-icon>
+        充电站选址系统
+      </div>
+      <div class="search-container">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索地点..."
+          class="search-input"
+          @keyup.enter="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+    </div>
+
+    <div class="main-container">
+      <!-- 左侧菜单栏 -->
+      <div class="menu-bar">
+        <el-menu
+          mode="vertical"
+          :ellipsis="false"
+          class="main-menu"
+          background-color="#545c64"
+          text-color="#fff"
+          active-text-color="#ffd04b"
+        >
+          <!-- 编辑工具菜单 -->
+          <el-sub-menu index="1">
+            <template #title>
+              <el-icon><Edit /></el-icon>
+              编辑工具
+            </template>
+            <el-menu-item-group>
+              <el-menu-item index="1-1" @click="activateTool('point')">
+                <el-icon><Location /></el-icon>
+                添加点位
+              </el-menu-item>
+              <el-menu-item index="1-2" @click="activateTool('polygon')">
+                <el-icon><Star /></el-icon>
+                绘制多边形
+              </el-menu-item>
+              <el-menu-item index="1-3" @click="activateTool('circle')">
+                <el-icon><CircleCheck /></el-icon>
+                绘制圆形
+              </el-menu-item>
+            </el-menu-item-group>
+          </el-sub-menu>
+
+          <!-- 数据管理菜单 -->
+          <el-sub-menu index="2">
+            <template #title>
+              <el-icon><Document /></el-icon>
+              数据管理
+            </template>
+            <el-menu-item-group>
+              <el-menu-item index="2-1" id="import-data-btn" @click="showImportDialog">
+                  <el-icon><Upload /></el-icon>
+                  导入数据
+              </el-menu-item>
+              <el-menu-item index="2-2" @click="showDataManager">
+                <el-icon><List /></el-icon>
+                数据列表
+              </el-menu-item>
+            </el-menu-item-group>
+          </el-sub-menu>
+
+          <!-- 图层控制菜单 -->
+          <el-sub-menu index="3">
+            <template #title>
+              <el-icon><Operation /></el-icon>
+              图层控制
+            </template>
+            <el-menu-item-group>
+              <el-menu-item 
+                v-for="layer in layers" 
+                :key="layer.id" 
+                :index="'layer-' + layer.id"
+                @click="handleLayerClick(layer.id, $event)"
+                class="layer-menu-item"
+              >
+                <template v-if="layer.id === 'charging'">
+                  <img src="@/assets/充电站.svg" class="layer-icon" alt="充电站" />
+                </template>
+                <template v-else-if="layer.id === 'parking'">
+                  <img src="@/assets/停车场.svg" class="layer-icon" alt="停车场" />
+                </template>
+                <template v-else-if="layer.id === 'recommended'">
+                  <img src="@/assets/推荐选址.svg" class="layer-icon" alt="推荐选址" />
+                </template>
+                <template v-else-if="layer.id === 'traffic'">
+                  <el-icon><Position /></el-icon>
+                </template>
+                <template v-else-if="layer.id === 'population'">
+                  <el-icon><User /></el-icon>
+                </template>
+                <span class="layer-name">{{ layer.name }}</span>
+                <el-checkbox 
+                  :model-value="activeLayerIds.has(layer.id)"
+                  class="layer-checkbox"
+                  @change="(val) => handleCheckboxChange(layer.id, $event)"
+                  @click.stop
+                />
+              </el-menu-item>
+            </el-menu-item-group>
+          </el-sub-menu>
+
+          <!-- 空间分析菜单 -->
+          <el-sub-menu index="4">
+            <template #title>
+              <el-icon><DataAnalysis /></el-icon>
+              空间分析
+            </template>
+            <el-menu-item-group>
+              <el-menu-item index="4-1" @click="showHeatmap">热力图分析</el-menu-item>
+              <el-menu-item index="4-2" @click="showBufferAnalysis">缓冲区分析</el-menu-item>
+              <el-menu-item index="4-3" @click="showNetworkAnalysis">路网分析</el-menu-item>
+              <el-menu-item index="4-4" @click="openServiceRangeDialog">服务范围分析</el-menu-item>
+            </el-menu-item-group>
+          </el-sub-menu>
+        </el-menu>
+      </div>
+
+      <!-- 地图容器 -->
+      <div class="content">
+        <div id="map" ref="mapContainer" style="width: 100%; height: 100%;"></div>
+      </div>
+    </div>
+
+    <!-- 数据表格对话框 -->
+    <el-dialog
+      v-model="showDataTable"
+      title="数据列表"
+      width="800px"
+    >
+      <el-table :data="pointData" height="400">
+        <el-table-column prop="name" label="名称" />
+        <el-table-column prop="type" label="类型" />
+        <el-table-column prop="address" label="地址" min-width="180"></el-table-column>
+        <el-table-column label="经度" width="100">
+          <template #default="scope">
+            <template v-if="typeof scope.row.longitude === 'number'">
+              {{ scope.row.longitude.toFixed(6) }}
+            </template>
+            <template v-else-if="typeof scope.row.lng === 'number'">
+              {{ scope.row.lng.toFixed(6) }}
+            </template>
+            <template v-else-if="typeof scope.row.longitude === 'string'">
+              {{ scope.row.longitude }}
+            </template>
+            <template v-else-if="typeof scope.row.lng === 'string'">
+              {{ scope.row.lng }}
+            </template>
+            <template v-else>--</template>
+          </template>
+        </el-table-column>
+        <el-table-column label="纬度" width="100">
+          <template #default="scope">
+            <template v-if="typeof scope.row.latitude === 'number'">
+              {{ scope.row.latitude.toFixed(6) }}
+            </template>
+            <template v-else-if="typeof scope.row.lat === 'number'">
+              {{ scope.row.lat.toFixed(6) }}
+            </template>
+            <template v-else-if="typeof scope.row.latitude === 'string'">
+              {{ scope.row.latitude }}
+            </template>
+            <template v-else-if="typeof scope.row.lat === 'string'">
+              {{ scope.row.lat }}
+            </template>
+            <template v-else>--</template>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="scope">
+            <el-button 
+              type="text" 
+              size="small"
+              @click="editPoint(scope.row)"
+            >
+              编辑
+            </el-button>
+            <el-button 
+              type="text" 
+              size="small"
+              @click="deletePoint(scope.row)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+    
+    <!-- 导入数据确认对话框 -->
+    <el-dialog
+      v-model="showImportConfirmDialog"
+      title="确认导入数据"
+      width="800px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div class="import-confirm-dialog">
+        <p>
+          共解析出 <strong>{{ importedDataList.length }}</strong> 条
+          <strong>{{ importDataType === 'charging' ? '充电站' : '停车场' }}</strong> 数据，
+          请确认是否导入到系统？
+        </p>
+        
+        <el-table :data="importedDataList" height="400" border>
+          <el-table-column type="index" label="#" width="50" />
+          <el-table-column prop="name" label="名称" />
+          <el-table-column prop="longitude" label="经度" />
+          <el-table-column prop="latitude" label="纬度" />
+          <el-table-column prop="address" label="地址" />
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="scope">
+              <el-button 
+                type="danger" 
+                size="small"
+                @click="removeImportedItem(scope.$index)"
+              >
+                移除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        
+        <div class="dialog-actions">
+          <el-button @click="cancelImportConfirm">取消导入</el-button>
+          <el-button type="primary" @click="confirmImportData" :loading="importingData">
+            确认导入
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 服务范围分析对话框 -->
+    <el-dialog
+      v-model="showServiceRangeDialog"
+      title="服务范围分析"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div class="service-range-dialog">
+        <div class="dialog-section">
+          <h4>服务范围设置</h4>
+          <div class="radius-control">
+            <span>服务半径：</span>
+            <el-slider
+              v-model="serviceRangeRadius"
+              :min="500"
+              :max="5000"
+              :step="100"
+              :format-tooltip="formatRadius"
+              @change="updateServiceRange"
+            />
+          </div>
+        </div>
+
+        <div class="dialog-section">
+          <h4>分析点位</h4>
+          <div class="point-selection">
+            <el-radio-group v-model="analysisMode">
+              <el-radio label="recommended">使用推荐选址点</el-radio>
+              <el-radio label="manual">手动选择点位</el-radio>
+            </el-radio-group>
+            
+            <div v-if="analysisMode === 'manual'" class="manual-points">
+              <div class="point-list">
+                <div v-for="(point, index) in manualPoints" :key="index" class="point-item">
+                  <span>点位 {{index + 1}}: {{point.name}}</span>
+                  <div class="point-actions">
+                    <el-button type="primary" size="small" @click="locateManualPoint(point)">定位</el-button>
+                  <el-button type="danger" size="small" @click="removeManualPoint(index)">删除</el-button>
+                </div>
+              </div>
+              </div>
+              <div class="manual-point-actions">
+              <el-button type="primary" @click="startPointSelection">添加点位</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <el-button @click="clearAllServiceAnalysis">清除分析</el-button>
+          <el-button type="primary" @click="applyServiceRange">应用分析</el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 区域绘制分析结果对话框 -->
+    <el-dialog 
+      title="区域分析结果"
+      v-model="showDrawAnalysisDialog"
+      width="80%"
+      top="5vh"
+      class="draw-analysis-dialog"
+      :append-to-body="true"
+      :destroy-on-close="false"
+    >
+      <div class="analysis-summary">
+        <div class="shape-info">
+          <template v-if="currentDrawnShape && currentDrawnShape.type === 'circle'">
+            <h4>圆形区域</h4>
+            <p>半径: {{ (drawAnalysisRadius/1000).toFixed(2) }} 公里</p>
+            <p>面积: {{ (drawAnalysisArea/1000000).toFixed(2) }} 平方公里</p>
+          </template>
+          <template v-else-if="currentDrawnShape && currentDrawnShape.type === 'polygon'">
+            <h4>多边形区域</h4>
+            <p>面积: {{ (drawAnalysisArea/1000000).toFixed(2) }} 平方公里</p>
+          </template>
+        </div>
+      </div>
+
+      <el-tabs type="border-card">
+        <!-- 充电站标签页 -->
+        <el-tab-pane label="充电站">
+          <div v-if="drawAnalysisResults.charging.length === 0" class="empty-data">
+            <el-empty description="区域内未找到充电站"></el-empty>
+          </div>
+          <div v-else>
+            <h4>找到 {{ drawAnalysisResults.charging.length }} 个充电站</h4>
+            <el-table 
+              :data="drawAnalysisResults.charging" 
+              stripe 
+              style="width: 100%" 
+              max-height="350px"
+              v-loading="drawAnalysisLoading"
+              :default-sort="{prop: 'name', order: 'ascending'}"
+            >
+              <el-table-column prop="name" label="名称" min-width="120"></el-table-column>
+              <el-table-column prop="address" label="地址" min-width="180"></el-table-column>
+              <el-table-column label="经度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.longitude === 'number'">
+                    {{ scope.row.longitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'number'">
+                    {{ scope.row.lng.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.longitude === 'string'">
+                    {{ scope.row.longitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'string'">
+                    {{ scope.row.lng }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="纬度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.latitude === 'number'">
+                    {{ scope.row.latitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'number'">
+                    {{ scope.row.lat.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.latitude === 'string'">
+                    {{ scope.row.latitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'string'">
+                    {{ scope.row.lat }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="scope">
+                  <el-button type="text" @click="locateAnalysisPoint(scope.row)">
+                    <i class="el-icon-location"></i> 定位
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 停车场标签页 -->
+        <el-tab-pane label="停车场">
+          <div v-if="drawAnalysisResults.parking.length === 0" class="empty-data">
+            <el-empty description="区域内未找到停车场"></el-empty>
+          </div>
+          <div v-else>
+            <h4>找到 {{ drawAnalysisResults.parking.length }} 个停车场</h4>
+            <el-table 
+              :data="drawAnalysisResults.parking" 
+              stripe 
+              style="width: 100%" 
+              max-height="350px"
+              v-loading="drawAnalysisLoading"
+              :default-sort="{prop: 'name', order: 'ascending'}"
+            >
+              <el-table-column prop="name" label="名称" min-width="120"></el-table-column>
+              <el-table-column prop="address" label="地址" min-width="180"></el-table-column>
+              <el-table-column label="经度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.longitude === 'number'">
+                    {{ scope.row.longitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'number'">
+                    {{ scope.row.lng.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.longitude === 'string'">
+                    {{ scope.row.longitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'string'">
+                    {{ scope.row.lng }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="纬度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.latitude === 'number'">
+                    {{ scope.row.latitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'number'">
+                    {{ scope.row.lat.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.latitude === 'string'">
+                    {{ scope.row.latitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'string'">
+                    {{ scope.row.lat }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="scope">
+                  <el-button type="text" @click="locateAnalysisPoint(scope.row)">
+                    <i class="el-icon-location"></i> 定位
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 推荐选址标签页 -->
+        <el-tab-pane label="推荐选址">
+          <div v-if="drawAnalysisResults.recommended.length === 0" class="empty-data">
+            <el-empty description="区域内未找到推荐选址点"></el-empty>
+          </div>
+          <div v-else>
+            <h4>找到 {{ drawAnalysisResults.recommended.length }} 个推荐选址点</h4>
+            <el-table 
+              :data="drawAnalysisResults.recommended" 
+              stripe 
+              style="width: 100%" 
+              max-height="350px"
+              v-loading="drawAnalysisLoading"
+              :default-sort="{prop: 'name', order: 'ascending'}"
+            >
+              <el-table-column prop="name" label="名称" min-width="120"></el-table-column>
+              <el-table-column prop="score" label="评分" width="80">
+                <template #default="scope">
+                  <span class="recommend-score">{{ scope.row.score }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="经度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.longitude === 'number'">
+                    {{ scope.row.longitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'number'">
+                    {{ scope.row.lng.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.longitude === 'string'">
+                    {{ scope.row.longitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lng === 'string'">
+                    {{ scope.row.lng }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="纬度" width="100">
+                <template #default="scope">
+                  <template v-if="typeof scope.row.latitude === 'number'">
+                    {{ scope.row.latitude.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'number'">
+                    {{ scope.row.lat.toFixed(6) }}
+                  </template>
+                  <template v-else-if="typeof scope.row.latitude === 'string'">
+                    {{ scope.row.latitude }}
+                  </template>
+                  <template v-else-if="typeof scope.row.lat === 'string'">
+                    {{ scope.row.lat }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="120">
+                <template #default="scope">
+                  <el-button type="text" @click="locateAnalysisPoint({
+                    name: scope.row.name,
+                    lat: scope.row.latitude,
+                    lng: scope.row.longitude,
+                    type: '推荐选址'
+                  })">
+                    <i class="el-icon-location"></i> 定位
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 人口分布标签页 -->
+        <el-tab-pane label="人口分布">
+          <div v-if="drawAnalysisResults.population.length === 0" class="empty-data">
+            <el-empty description="区域内未找到人口分布点"></el-empty>
+          </div>
+          <div v-else>
+            <h4>找到 {{ drawAnalysisResults.population.length }} 个人口分布点</h4>
+            <el-table 
+              :data="drawAnalysisResults.population" 
+              stripe 
+              style="width: 100%" 
+              max-height="350px"
+              v-loading="drawAnalysisLoading"
+              :default-sort="{prop: 'name', order: 'ascending'}"
+            >
+              <el-table-column prop="name" label="位置名称" min-width="120"></el-table-column>
+              <el-table-column prop="value" label="人口" width="80"></el-table-column>
+              <el-table-column label="经度" width="100">
+                <template #default="scope">
+                  <template v-if="geoCoordMap && scope.row && scope.row.name && geoCoordMap[scope.row.name] && geoCoordMap[scope.row.name].length >= 2">
+                    {{ geoCoordMap[scope.row.name][0].toFixed(6) }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="纬度" width="100">
+                <template #default="scope">
+                  <template v-if="geoCoordMap && scope.row && scope.row.name && geoCoordMap[scope.row.name] && geoCoordMap[scope.row.name].length >= 2">
+                    {{ geoCoordMap[scope.row.name][1].toFixed(6) }}
+                  </template>
+                  <template v-else>--</template>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="scope">
+                  <el-button type="text" @click="locateAnalysisPoint({
+                    name: scope.row.name,
+                    lat: geoCoordMap && scope.row && scope.row.name && geoCoordMap[scope.row.name] ? geoCoordMap[scope.row.name][1] : 0,
+                    lng: geoCoordMap && scope.row && scope.row.name && geoCoordMap[scope.row.name] ? geoCoordMap[scope.row.name][0] : 0,
+                    type: '人口分布'
+                  })">
+                    <i class="el-icon-location"></i> 定位
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="showDrawAnalysisDialog = false">关闭</el-button>
+          <el-button type="primary" @click="searchDrawnArea">重新搜索</el-button>
+          <el-button type="danger" @click="clearDrawAnalysis">清除分析</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 添加数据管理器组件 -->
+    <DataManager ref="dataManager" @locate="handleLocate" @point-deleted="handlePointDeleted" />
+    
+    <!-- 导入数据对话框 -->
+    <el-dialog
+      v-model="showImportDialogVisible"
+      title="导入数据"
+      width="500px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div class="import-dialog">
+        <h4>请选择导入方式</h4>
+        <div class="import-options">
+          <el-button type="primary" @click="selectImportMethod('file')">
+            <el-icon><Upload /></el-icon>
+            文件导入
+          </el-button>
+          <el-button type="primary" @click="selectImportMethod('map')">
+            <el-icon><Location /></el-icon>
+            地图标点
+          </el-button>
+        </div>
+        
+        <!-- 文件导入表单（当选择文件导入时显示） -->
+        <div v-if="importMethod === 'file'" class="file-import-form">
+          <h4>上传数据文件（TXT格式）</h4>
+          <el-upload
+            class="upload-box"
+            action="#"
+            :auto-upload="false"
+            :show-file-list="true"
+            :limit="1"
+            :on-change="handleFileChange"
+            :on-exceed="handleExceed"
+          >
+            <el-button type="primary">
+              <el-icon><Upload /></el-icon>
+              选择文件
+            </el-button>
+            <template #tip>
+              <div class="el-upload__tip">
+                请上传TXT格式文件，每行格式：名称,经度,纬度,地址(可选)
+              </div>
+            </template>
+          </el-upload>
+          
+          <div class="data-type-selector">
+            <h4>选择数据类型</h4>
+            <el-radio-group v-model="importDataType">
+              <el-radio label="charging">充电站</el-radio>
+              <el-radio label="parking">停车场</el-radio>
+            </el-radio-group>
+          </div>
+        </div>
+        
+        <!-- 地图标点说明（当选择地图标点时显示） -->
+        <div v-if="importMethod === 'map'" class="map-import-info">
+          <h4>地图标点说明</h4>
+          <p>1. 关闭此对话框后，鼠标指针将变为十字形</p>
+          <p>2. 在地图上点击位置添加点位</p>
+          <p>3. 输入点位名称并确认</p>
+          <p>4. 添加完成后，可在数据列表中查看和管理点位</p>
+          <p>当前将添加的数据类型：<strong>{{ importDataType === 'charging' ? '充电站' : '停车场' }}</strong></p>
+        </div>
+        
+        <div class="dialog-actions">
+          <el-button @click="cancelImport">取消</el-button>
+          <el-button type="primary" @click="confirmImport" :disabled="!canConfirmImport">
+            确定
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<script>
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+import 'leaflet-draw'
+import 'leaflet-draw/dist/leaflet.draw.css'
+import {
+  Location,
+  Operation,
+  Position,
+  User,
+  Edit,
+  Document,
+  Upload,
+  List,
+  Star,
+  CircleCheck,
+  Search,
+  DataAnalysis
+} from '@element-plus/icons-vue'
+import { data as outputData, geoCoordMap } from '@/data/output.js'
+import { recommendedLocations } from '@/data/recommendedLocations.js'
+import axios from 'axios'
+import { tiandituKey } from '@/config/map-config'
+import DataManager from './DataManager.vue'
+
+export default {
+  name: 'MapView',
+  components: {
+    Location,
+    Operation,
+    Position,
+    User,
+    Edit,
+    Document,
+    Upload,
+    List,
+    Star,
+    CircleCheck,
+    Search,
+    DataAnalysis,
+    DataManager
+  },
+  data() {
+    return {
+      map: null,
+      baseLayers: {},
+      center: [32.0584, 118.7965],
+      tiandituKey,
+      layers: [
+        { id: 'charging', name: '充电站', icon: 'charging', hasCheckbox: true },
+        { id: 'parking', name: '停车场', icon: 'parking', hasCheckbox: true },
+        { id: 'recommended', name: '系统推荐选址', icon: 'recommended', hasCheckbox: true },
+        { id: 'traffic', name: '交通路网', icon: 'traffic', hasCheckbox: true },
+        { id: 'population', name: '人口分布', icon: 'population', hasCheckbox: true }
+      ],
+      activeLayerIds: new Set([]),
+      layerInstances: {},
+      searchQuery: '',
+      searchResults: [],
+      searchLayer: null,
+      serviceRangeRadius: 1000,
+      serviceRangeLayer: null,
+      serviceRangeLinesLayer: null,
+      isServiceRangeActive: false,
+      analysisMode: 'manual',
+      manualPoints: [],
+      isSelectingPoint: false,
+      currentTool: null,
+      showEditPanel: true,
+      showDataPanel: false,
+      pointData: [],
+      showDataTable: false,
+      heatmapLayer: null,
+      heatmapData: outputData,
+      isHeatmapVisible: false,
+      chargingStations: [],
+      parkingLots: [],
+      backendStations: [],
+      tiandituStations: [],
+      backendParkingLots: [],
+      tiandituParkingLots: [],
+      recommendedLocations: recommendedLocations,
+      tempLocationMarker: null,
+      showImportDialogVisible: false,
+      importMethod: null,
+      importDataType: 'charging',
+      canConfirmImport: false,
+      currentDataType: 'charging',
+      importedDataList: [],
+      importingData: false,
+      showImportConfirmDialog: false,
+      markers: {},
+      // 服务分析相关
+      showServiceRangeDialog: false,
+      isPickingLocation: false,
+      locationPickPurpose: null,
+      serviceLayerGroup: null,
+      serviceMarkers: {},
+      // 绘图相关
+      drawControl: null,
+      drawLayer: null,
+      drawing: false,
+      drawnItems: null,
+      currentDrawnShape: null,
+      showDrawAnalysisDialog: false,
+      drawAnalysisResults: {
+        charging: [],
+        parking: [],
+        recommended: [],
+        population: []
+      },
+      drawAnalysisRadius: 0,
+      drawAnalysisArea: 0,
+      
+      // 添加一个loading状态
+      drawAnalysisLoading: false,
+    }
+  },
+  watch: {
+    analysisMode(newValue) {
+      if (newValue === 'manual') {
+        // 关闭推荐选址和人口分布图层，清除现有服务范围
+        this.clearServiceRange();
+        
+        // 如果图层正在显示，关闭它们
+        if (this.activeLayerIds.has('recommended')) {
+          this.toggleLayer('recommended');
+        }
+        if (this.activeLayerIds.has('population')) {
+          this.toggleLayer('population');
+        }
+        
+        this.$message.info('已切换到手动选点模式，请添加分析点位');
+      } else if (newValue === 'recommended') {
+        // 打开推荐选址和人口分布图层
+        if (!this.activeLayerIds.has('recommended')) {
+          this.toggleLayer('recommended');
+        }
+        if (!this.activeLayerIds.has('population')) {
+          this.toggleLayer('population');
+        }
+        
+        this.$message.info('已切换到推荐选址模式');
+      }
+    }
+  },
+  mounted() {
+    this.initMap().then(() => {
+      this.initLayers()
+      this.initDrawTools()
+    })
+  },
+  methods: {
+    async initMap() {
+      console.log('【检查点4】: 开始初始化地图')
+      
+      this.map = L.map('map', {
+        center: [32.05, 118.78],
+        zoom: 11,
+        zoomControl: false,
+        zoomAnimation: false,    // 禁用缩放动画
+        fadeAnimation: false,    // 禁用渐变动画
+        markerZoomAnimation: false,  // 禁用标记缩放动画
+        zoomSnap: 1,            // 设置缩放级别的最小变化量
+        wheelDebounceTime: 100  // 增加滚轮事件的防抖时间
+      })
+      console.log('【检查点5】: 地图实例是否创建:', !!this.map)
+
+      // 添加底图
+      this.initBaseLayers()
+      this.baseLayers.vec.addTo(this.map)
+      this.baseLayers.cva.addTo(this.map)
+      console.log('【检查点6】: 底图是否添加到地图:', this.map.hasLayer(this.baseLayers.vec))
+
+      L.control.zoom({
+        position: 'bottomright'
+      }).addTo(this.map)
+
+      L.control.scale({
+        imperial: false,
+        metric: true,
+        position: 'bottomleft'
+      }).addTo(this.map)
+
+      // 等待地图加载完成
+      this.map.whenReady(() => {
+        setTimeout(() => {
+          this.map.invalidateSize()
+        }, 200)
+      })
+
+      // 添加地图移动结束事件监听
+      this.map.on('moveend', () => {
+        if (this.activeLayerIds.has('traffic')) {
+          this.updateTrafficLayer()
+        }
+      })
+      
+      // 创建服务范围分析图层组
+      this.serviceLayerGroup = L.layerGroup().addTo(this.map)
+      
+      // 添加地图点击事件监听器
+      this.map.on('click', (e) => {
+        // 如果是位置选择模式，处理位置选择
+        if (this.isPickingLocation) {
+          this.handleLocationPick()
+          return
+        }
+        
+        // 否则按常规方式处理地图点击
+        this.handleMapClick(e)
+      })
+    },
+    initBaseLayers() {
+      console.log('【检查点1】: 开始初始化底图')
+      
+      const tdtKey = this.tiandituKey
+      
+      this.baseLayers = {
+        // 矢量底图
+        vec: L.tileLayer('http://t{s}.tianditu.gov.cn/vec_w/wmts?layer=vec&style=default&tilematrixset=w&Service=WMTS&Request=GetTile&Version=1.0.0&Format=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}&tk=' + tdtKey, {
+          subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+          maxZoom: 18,
+          minZoom: 1
+        }),
+        // 添加注记图层
+        cva: L.tileLayer('http://t{s}.tianditu.gov.cn/cva_w/wmts?layer=cva&style=default&tilematrixset=w&Service=WMTS&Request=GetTile&Version=1.0.0&Format=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}&tk=' + tdtKey, {
+          subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+          maxZoom: 18,
+          minZoom: 1
+        })
+      }
+    },
+    switchBaseMap(type) {
+      Object.values(this.baseLayers).forEach(layer => {
+        this.map.removeLayer(layer)
+      })
+      this.baseLayers[type].addTo(this.map)
+    },
+    initLayers() {
+      // 初始化图层组
+      this.layerInstances = {
+        charging: L.layerGroup(),
+        parking: L.layerGroup(),
+        traffic: L.layerGroup(),
+        population: L.layerGroup(),
+        recommended: L.layerGroup()
+      }
+
+      // 默认没有启用任何图层
+      this.activeLayerIds = new Set()
+
+      console.log('图层初始化完成')
+    },
+    toggleLayer(layerId, event) {
+      // 如果传入了事件对象且有stopPropagation方法，才阻止事件冒泡
+      if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation()
+      }
+      
+      console.log(`切换图层 ${layerId}, 当前状态: ${this.activeLayerIds.has(layerId) ? '激活' : '未激活'}`)
+      
+      if (this.activeLayerIds.has(layerId)) {
+        // 如果图层已激活，移除选中状态并隐藏图层
+        this.activeLayerIds.delete(layerId)
+        
+        // 隐藏图层
+        if (this.layerInstances[layerId]) {
+          this.map.removeLayer(this.layerInstances[layerId])
+        }
+        
+        console.log(`图层 ${layerId} 已关闭`)
+      } else {
+        // 如果图层未激活，添加选中状态并加载图层
+        this.activeLayerIds.add(layerId)
+        
+        // 确保图层实例存在
+        if (!this.layerInstances[layerId]) {
+          this.layerInstances[layerId] = L.layerGroup().addTo(this.map)
+        } else {
+          // 添加图层到地图
+          this.layerInstances[layerId].addTo(this.map)
+        }
+        
+        console.log(`图层 ${layerId} 已开启，开始加载数据...`)
+        
+        // 根据图层类型加载数据
+        if (layerId === 'charging') {
+          this.fetchChargingStations()
+        } else if (layerId === 'parking') {
+          this.fetchParkingLots()
+        } else if (layerId === 'recommended') {
+          this.updateRecommendedLocations()
+        } else if (layerId === 'population') {
+          this.updatePopulationLayer()
+        } else if (layerId === 'traffic') {
+          this.updateTrafficLayer()
+        }
+      }
+    },
+    activateTool(tool) {
+      // 如果当前工具已经激活，则停用它
+      if (this.currentTool === tool) {
+        this.currentTool = null
+        
+        // 如果正在绘制，取消绘制
+        if (this.drawing && this.drawControl) {
+          this.drawing = false
+          // 禁用所有绘图工具
+          if (this.drawControl.polygon) this.drawControl.polygon.disable()
+          if (this.drawControl.circle) this.drawControl.circle.disable()
+          
+          if (this.currentDrawnShape) {
+            // 清除绘制的图形
+            this.drawnItems.clearLayers()
+            this.currentDrawnShape = null
+            
+            // 隐藏分析对话框
+            this.showDrawAnalysisDialog = false
+          }
+        }
+        
+        this.$message.info('已停用工具')
+        document.getElementById('map').style.cursor = ''
+        return
+      }
+      
+      // 设置当前激活的工具
+      this.currentTool = tool
+      
+      // 根据工具类型显示不同提示
+      if (tool === 'point') {
+        this.$message.info('请在地图上点击添加新的点位')
+        document.getElementById('map').style.cursor = 'crosshair'
+      } else if (tool === 'polygon') {
+        // 清除之前的绘制结果
+        if (this.drawnItems) {
+          this.drawnItems.clearLayers()
+        }
+        this.currentDrawnShape = null
+        
+        // 隐藏分析对话框
+        this.showDrawAnalysisDialog = false
+        
+        // 开始多边形绘制
+        if (this.drawControl && this.drawControl.polygon) {
+          this.drawing = true
+          this.drawControl.polygon.enable()
+          this.$message.info('请在地图上点击绘制多边形，双击结束绘制')
+        } else {
+          this.$message.error('多边形绘制工具初始化失败')
+          this.currentTool = null
+        }
+      } else if (tool === 'circle') {
+        // 清除之前的绘制结果
+        if (this.drawnItems) {
+          this.drawnItems.clearLayers()
+        }
+        this.currentDrawnShape = null
+        
+        // 开始圆形绘制
+        if (this.drawControl.circle) {
+          this.drawing = true
+          this.drawControl.circle.enable()
+          this.$message.info('请在地图上点击选择圆心，然后拖动确定半径')
+        } else {
+          this.$message.error('圆形绘制工具初始化失败')
+          this.currentTool = null
+        }
+      }
+      
+      // 更改鼠标样式以提示用户
+      if (this.currentTool && this.currentTool !== 'polygon' && this.currentTool !== 'circle') {
+        document.getElementById('map').style.cursor = 'crosshair'
+      } else if (!this.currentTool) {
+        document.getElementById('map').style.cursor = ''
+      }
+    },
+    showHeatmap() {
+      console.log('【检查点7】: 检查热力图状态')
+      
+      // 如果热力图已存在且在地图上，则移除它
+      if (this.heatmapLayer && this.map.hasLayer(this.heatmapLayer)) {
+        console.log('【检查点8】: 移除热力图')
+        this.map.removeLayer(this.heatmapLayer)
+        this.heatmapLayer = null
+        return  // 直接返回，不再继续执行
+      }
+
+      console.log('【检查点9】: 创建新的热力图')
+      
+      // 确保底图和注记都存在
+      if (!this.map.hasLayer(this.baseLayers.vec)) {
+        this.baseLayers.vec.addTo(this.map)
+      }
+      if (!this.map.hasLayer(this.baseLayers.cva)) {
+        this.baseLayers.cva.addTo(this.map)
+      }
+
+      // 获取数据的最大值和最小值
+      const maxValue = Math.max(...outputData.map(item => item.value))
+      const minValue = Math.min(...outputData.map(item => item.value))
+      console.log('Value range:', { min: minValue, max: maxValue })
+
+      // 转换数据格式
+      const points = outputData.map(item => {
+        const coords = geoCoordMap[item.name]
+        if (!coords) {
+          console.warn(`No coordinates found for ${item.name}`)
+          return null
+        }
+        // 将value值归一化到0-1之间
+        const normalizedValue = (item.value - minValue) / (maxValue - minValue)
+        return [
+          coords[1], // 纬度
+          coords[0], // 经度
+          normalizedValue // 归一化后的强度值
+        ]
+      }).filter(point => point !== null)
+
+      if (points.length === 0) {
+        console.warn('No valid points found for heatmap')
+        this.$message.error('没有找到有效的热力图数据点')
+        return
+      }
+
+      try {
+        // 使用 leaflet.heat 创建热力图层，使用更丰富的颜色渐变
+        this.heatmapLayer = L.heatLayer(points, {
+          radius: 25,
+          blur: 15,
+          maxZoom: 10,
+          max: 1.0,
+          gradient: {
+            0.1: '#041f60',    // 更深的蓝色（低值）
+            0.3: '#0846b9',    // 深蓝色
+            0.5: '#ffd700',    // 金黄色
+            0.7: '#ff8c00',    // 深橙色
+            0.9: '#ff4500',    // 红橙色
+            1.0: '#8b0000'     // 深红色（高值）
+          }
+        })
+
+        // 添加到地图
+        console.log('【检查点11】: 热力图创建完成，检查底图状态:', this.map.hasLayer(this.baseLayers.vec))
+        this.heatmapLayer.addTo(this.map)
+
+        // 调整视图范围
+        const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]))
+        if (bounds.isValid()) {
+          this.map.fitBounds(bounds, {
+            padding: [50, 50]
+          })
+        }
+        
+        this.$message.success(`热力图加载成功（数值范围：${minValue} - ${maxValue}）`)
+      } catch (error) {
+        console.error('【检查点12】: 创建热力图错误:', error)
+        this.$message.error('创建热力图时发生错误')
+      }
+    },
+    showBufferAnalysis() {
+      // TODO: 实现缓冲区分析
+    },
+    showNetworkAnalysis() {
+      // TODO: 实现路网分析
+    },
+    openServiceRangeDialog() {
+      // 显示服务范围分析对话框
+      this.showServiceRangeDialog = true;
+      
+      // 首先判断当前分析模式，如果是推荐选址模式，则打开相关图层
+      if (this.analysisMode === 'recommended') {
+        // 确保推荐选址和人口分布图层被加载
+        if (!this.layerInstances.recommended || this.layerInstances.recommended.getLayers().length === 0) {
+          console.log('正在加载推荐选址数据...')
+          this.updateRecommendedLocationsFromLocal()
+        
+        // 确保图层添加到地图上
+        if (this.layerInstances.recommended && !this.map.hasLayer(this.layerInstances.recommended)) {
+          this.layerInstances.recommended.addTo(this.map)
+            // 设置为激活状态
+            this.activeLayerIds.add('recommended')
+          }
+        }
+        
+        if (!this.layerInstances.population || this.layerInstances.population.getLayers().length === 0) {
+          console.log('正在加载人口分布数据...')
+          this.updatePopulationLayer()
+        
+        // 确保图层添加到地图上
+        if (this.layerInstances.population && !this.map.hasLayer(this.layerInstances.population)) {
+          this.layerInstances.population.addTo(this.map)
+            // 设置为激活状态
+            this.activeLayerIds.add('population')
+        }
+      }
+      
+        // 推荐选址模式下，确保充电站数据已加载，因为需要这些数据进行分析
+        if (!this.layerInstances.charging || this.layerInstances.charging.getLayers().length === 0) {
+          console.log('正在加载充电站数据...')
+          this.fetchChargingStations()
+          
+          // 确保图层添加到地图上
+          if (this.layerInstances.charging && !this.map.hasLayer(this.layerInstances.charging)) {
+            this.layerInstances.charging.addTo(this.map)
+            // 设置为激活状态
+            this.activeLayerIds.add('charging')
+          }
+        }
+      } else if (this.analysisMode === 'manual') {
+        // 如果是手动选点模式，关闭推荐选址和人口分布图层
+        if (this.activeLayerIds.has('recommended')) {
+          this.toggleLayer('recommended')
+        }
+        if (this.activeLayerIds.has('population')) {
+          this.toggleLayer('population')
+        }
+        
+        // 手动选点模式下不自动加载充电站图层
+      }
+    },
+    
+    // 设置分析模式
+    setAnalysisMode(mode) {
+      this.analysisMode = mode;
+      
+      // 如果从推荐模式切换到手动模式，清除推荐点位
+      if (mode === 'manual') {
+        // 清除推荐结果，仅保留手动点位
+        this.clearRecommendedPoints();
+      } else if (mode === 'recommended') {
+        // 切换到推荐模式，可以保留手动点位
+      }
+    },
+    
+    // 清除推荐点位
+    clearRecommendedPoints() {
+      if (this.serviceLayerGroup) {
+        // 遍历所有服务标记，仅保留手动添加的标记
+        Object.entries(this.serviceMarkers).forEach(([id, markerInfo]) => {
+          if (markerInfo.data && markerInfo.data.source !== 'manual') {
+            // 移除非手动添加的标记
+            this.serviceLayerGroup.removeLayer(markerInfo.marker);
+            this.serviceLayerGroup.removeLayer(markerInfo.circle);
+            delete this.serviceMarkers[id];
+          }
+        });
+      }
+    },
+    
+    // 进入位置选择模式
+    enterLocationPickMode(purpose) {
+      this.isPickingLocation = true;
+      this.locationPickPurpose = purpose; // 'add' 或 'edit'
+      
+      // 改变鼠标样式提示用户
+      document.getElementById('map').style.cursor = 'crosshair';
+      
+      // 提示用户
+      this.$message.info('请在地图上点击选择位置');
+    },
+    
+    // 处理位置选择
+    handleLocationPick() {
+      // 重置鼠标样式
+      document.getElementById('map').style.cursor = '';
+      
+      // 重置状态
+      this.isPickingLocation = false;
+      this.locationPickPurpose = null;
+    },
+    
+    // 处理添加点位
+    handleAddPoint(point) {
+      // 创建点位对象
+      const newPoint = {
+        id: point.id,
+        name: point.name,
+        latitude: point.lat,
+        longitude: point.lng,
+        lat: point.lat,
+        lng: point.lng,
+        type: point.type,
+        source: 'manual'
+      };
+      
+      // 添加到手动点位列表
+      this.manualPoints.push({
+        id: point.id,
+        name: point.name,
+        lat: point.lat,
+        lng: point.lng,
+        type: point.type
+      });
+      
+      // 添加到地图上
+      this.addPointMarkerToServiceAnalysis({
+        id: point.id,
+        name: point.name,
+        lat: point.lat,
+        lng: point.lng,
+        type: point.type
+      });
+      
+      // 如果是充电站，也添加到充电站数据集
+      if (point.type === '充电站') {
+        this.chargingStations.push(newPoint);
+        
+        // 添加标记到充电站图层
+        const icon = L.icon({
+          iconUrl: require('@/assets/充电站.svg'),
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          popupAnchor: [0, -32]
+        });
+        
+        const marker = L.marker([point.lat, point.lng], {
+          icon: icon
+        });
+        
+        // 创建弹出窗口内容
+        const popupContent = `
+          <div class="poi-popup">
+            <h3>${point.name}</h3>
+            <p><strong>类型：</strong>${point.type}</p>
+            <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+            <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+            <p><strong>来源：</strong>手动添加</p>
+          </div>
+        `;
+        
+        // 绑定弹出窗口
+        marker.bindPopup(popupContent);
+        
+        // 添加到图层
+        if (!this.activeLayerIds.has('charging')) {
+          this.activeLayerIds.add('charging');
+          this.layerInstances.charging.addTo(this.map);
+        }
+        marker.addTo(this.layerInstances.charging);
+        
+        // 保存到markers集合
+        if (!this.markers.charging) {
+          this.markers.charging = [];
+        }
+        this.markers.charging.push({
+          id: point.id,
+          marker: marker,
+          data: newPoint
+        });
+      }
+      
+      // 更新数据表格
+      this.pointData.push({
+        id: point.id,
+        name: point.name,
+        type: point.type,
+        lat: point.lat,
+        lng: point.lng,
+        source: '手动添加'
+      });
+      
+      // 保存到后端数据库
+      this.savePointToBackend({
+        name: point.name,
+        latitude: point.lat,
+        longitude: point.lng,
+        type: point.type
+      }, point.type === '充电站' ? 'charging' : 'parking');
+      
+      // 提示用户添加成功
+      this.$message.success(`成功添加${point.type}点位: ${point.name}`);
+    },
+    
+    // 处理更新点位
+    handleUpdatePoint(point) {
+      // 查找并更新手动点位列表中的点位
+      const manualIndex = this.manualPoints.findIndex(p => p.id === point.id);
+      if (manualIndex !== -1) {
+        this.manualPoints[manualIndex] = {
+          id: point.id,
+          name: point.name,
+          lat: point.lat,
+          lng: point.lng,
+          type: point.type
+        };
+        
+        // 更新地图上的标记
+        this.updatePointMarkerInServiceAnalysis({
+          id: point.id,
+          name: point.name,
+          lat: point.lat,
+          lng: point.lng,
+          type: point.type
+        });
+        
+        // 如果是充电站，也更新充电站数据集
+        if (point.type === '充电站') {
+          const chargingIndex = this.chargingStations.findIndex(p => p.id === point.id);
+          if (chargingIndex !== -1) {
+            this.chargingStations[chargingIndex] = {
+              id: point.id,
+              name: point.name,
+              latitude: point.lat,
+              longitude: point.lng,
+              lat: point.lat,
+              lng: point.lng,
+              type: point.type,
+              source: 'manual'
+            };
+            
+            // 更新充电站标记
+            if (this.markers.charging) {
+              const markerIndex = this.markers.charging.findIndex(m => m.id === point.id);
+              if (markerIndex !== -1) {
+                // 删除旧标记
+                this.layerInstances.charging.removeLayer(this.markers.charging[markerIndex].marker);
+                
+                // 创建新标记
+                const icon = L.icon({
+                  iconUrl: require('@/assets/充电站.svg'),
+                  iconSize: [32, 32],
+                  iconAnchor: [16, 32],
+                  popupAnchor: [0, -32]
+                });
+                
+                const marker = L.marker([point.lat, point.lng], {
+                  icon: icon
+                });
+                
+                // 创建弹出窗口内容
+                const popupContent = `
+                  <div class="poi-popup">
+                    <h3>${point.name}</h3>
+                    <p><strong>类型：</strong>${point.type}</p>
+                    <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+                    <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+                    <p><strong>来源：</strong>手动添加</p>
+                  </div>
+                `;
+                
+                // 绑定弹出窗口
+                marker.bindPopup(popupContent);
+                
+                // 添加到图层
+                marker.addTo(this.layerInstances.charging);
+                
+                // 更新markers集合
+                this.markers.charging[markerIndex] = {
+                  id: point.id,
+                  marker: marker,
+                  data: {
+                    id: point.id,
+                    name: point.name,
+                    latitude: point.lat,
+                    longitude: point.lng,
+                    lat: point.lat,
+                    lng: point.lng,
+                    type: point.type,
+                    source: 'manual'
+                  }
+                };
+              }
+            }
+          }
+        }
+        
+        // 更新数据表格
+        const dataIndex = this.pointData.findIndex(p => p.id === point.id);
+        if (dataIndex !== -1) {
+          this.pointData[dataIndex] = {
+            id: point.id,
+            name: point.name,
+            type: point.type,
+            lat: point.lat,
+            lng: point.lng,
+            source: '手动添加'
+          };
+        }
+        
+        // 提示用户更新成功
+        this.$message.success(`成功更新点位: ${point.name}`);
+      }
+    },
+    
+    // 处理删除点位
+    handleDeletePoint(pointId) {
+      // 查找并从手动点位列表中删除点位
+      const manualIndex = this.manualPoints.findIndex(p => p.id === pointId);
+      if (manualIndex !== -1) {
+        const point = this.manualPoints[manualIndex];
+        
+        // 从服务分析图层中删除
+        this.removePointMarkerFromServiceAnalysis(pointId);
+        
+        // 删除手动点位
+        this.manualPoints.splice(manualIndex, 1);
+        
+        // 如果是充电站，也从充电站数据集中删除
+        if (point.type === '充电站') {
+          const chargingIndex = this.chargingStations.findIndex(p => p.id === point.id);
+          if (chargingIndex !== -1) {
+            this.chargingStations.splice(chargingIndex, 1);
+          }
+          
+          // 删除充电站标记
+          if (this.markers.charging) {
+            const markerIndex = this.markers.charging.findIndex(m => m.id === point.id);
+            if (markerIndex !== -1) {
+              // 从图层中移除标记
+              this.layerInstances.charging.removeLayer(this.markers.charging[markerIndex].marker);
+              
+              // 从标记集合中删除
+              this.markers.charging.splice(markerIndex, 1);
+            }
+          }
+        }
+        
+        // 从数据表格中删除
+        const dataIndex = this.pointData.findIndex(item => item.id === pointId);
+        if (dataIndex !== -1) {
+          this.pointData.splice(dataIndex, 1);
+        }
+        
+        // 提示用户删除成功
+        this.$message.success(`成功删除点位`);
+      }
+    },
+    
+    // 将点位添加到服务分析图层
+    addPointMarkerToServiceAnalysis(point) {
+      // 创建自定义图标
+      const icon = L.icon({
+        iconUrl: require(`@/assets/${point.type === '充电站' ? '充电站' : '定位'}.svg`),
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -32]
+      });
+      
+      // 创建标记
+      const marker = L.marker([point.lat, point.lng], {
+        icon: icon
+      });
+      
+      // 创建弹出窗口内容
+      const popupContent = `
+        <div class="poi-popup">
+          <h3>${point.name}</h3>
+          <p><strong>类型：</strong>${point.type}</p>
+          <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+          <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+        </div>
+      `;
+      
+      // 绑定弹出窗口
+      marker.bindPopup(popupContent);
+      
+      // 添加到服务范围分析图层
+      marker.addTo(this.serviceLayerGroup);
+      
+      // 绘制服务范围圆
+      const circle = L.circle([point.lat, point.lng], {
+        color: 'blue',
+        fillColor: '#30f',
+        fillOpacity: 0.2,
+        radius: this.serviceRangeRadius
+      }).addTo(this.serviceLayerGroup);
+      
+      // 保存标记和圆形到服务标记集合
+      this.serviceMarkers[point.id] = {
+        marker: marker,
+        circle: circle,
+        data: point
+      };
+    },
+    
+    // 更新服务分析图层中的点位标记
+    updatePointMarkerInServiceAnalysis(point) {
+      if (this.serviceMarkers[point.id]) {
+        // 删除旧标记和圆形
+        this.serviceLayerGroup.removeLayer(this.serviceMarkers[point.id].marker);
+        this.serviceLayerGroup.removeLayer(this.serviceMarkers[point.id].circle);
+        
+        // 创建自定义图标
+        const icon = L.icon({
+          iconUrl: require(`@/assets/${point.type === '充电站' ? '充电站' : '定位'}.svg`),
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          popupAnchor: [0, -32]
+        });
+        
+        // 创建标记
+        const marker = L.marker([point.lat, point.lng], {
+          icon: icon
+        });
+        
+        // 创建弹出窗口内容
+        const popupContent = `
+          <div class="poi-popup">
+            <h3>${point.name}</h3>
+            <p><strong>类型：</strong>${point.type}</p>
+            <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+            <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+          </div>
+        `;
+        
+        // 绑定弹出窗口
+        marker.bindPopup(popupContent);
+        
+        // 添加到服务范围分析图层
+        marker.addTo(this.serviceLayerGroup);
+        
+        // 绘制服务范围圆
+        const circle = L.circle([point.lat, point.lng], {
+          color: 'blue',
+          fillColor: '#30f',
+          fillOpacity: 0.2,
+          radius: this.serviceRangeRadius
+        }).addTo(this.serviceLayerGroup);
+        
+        // 更新服务标记集合
+        this.serviceMarkers[point.id] = {
+          marker: marker,
+          circle: circle,
+          data: point
+        };
+      }
+    },
+    
+    // 从服务分析图层中删除点位标记
+    removePointMarkerFromServiceAnalysis(pointId) {
+      if (this.serviceMarkers[pointId]) {
+        // 删除标记和圆形
+        this.serviceLayerGroup.removeLayer(this.serviceMarkers[pointId].marker);
+        this.serviceLayerGroup.removeLayer(this.serviceMarkers[pointId].circle);
+        
+        // 从服务标记集合中删除
+        delete this.serviceMarkers[pointId];
+      }
+    },
+    
+    // 更新所有服务范围圆的半径
+    updateServiceRadius(radius) {
+      this.serviceRangeRadius = radius;
+      
+      // 更新所有圆形的半径
+      Object.values(this.serviceMarkers).forEach(item => {
+        // 删除旧圆形
+        this.serviceLayerGroup.removeLayer(item.circle);
+        
+        // 创建新圆形
+        const circle = L.circle([item.data.lat, item.data.lng], {
+          color: 'blue',
+          fillColor: '#30f',
+          fillOpacity: 0.2,
+          radius: radius
+        }).addTo(this.serviceLayerGroup);
+        
+        // 更新圆形引用
+        item.circle = circle;
+      });
+    },
+    startPointSelection() {
+      // 确保当前是手动选点模式
+      if (this.analysisMode !== 'manual') {
+        this.analysisMode = 'manual'
+      }
+      
+      // 关闭服务范围分析对话框
+      this.showServiceRangeDialog = false
+      
+      // 设置为选点模式
+      this.isSelectingPoint = true
+      
+      // 将地图光标样式设置为十字形
+      document.getElementById('map').style.cursor = 'crosshair'
+      
+      // 添加ESC键取消选点的事件监听
+      const cancelSelectionHandler = (e) => {
+        if (e.key === 'Escape' && this.isSelectingPoint) {
+          // 取消选点模式
+          this.isSelectingPoint = false
+          // 恢复默认光标样式
+          document.getElementById('map').style.cursor = ''
+          // 移除事件监听
+          document.removeEventListener('keydown', cancelSelectionHandler)
+          // 重新打开服务范围分析对话框
+          this.showServiceRangeDialog = true
+          // 显示提示
+          this.$message.info('已取消选点')
+        }
+      }
+      
+      // 添加ESC键事件监听
+      document.addEventListener('keydown', cancelSelectionHandler)
+      
+      this.map.once('click', (e) => {
+        // 直接使用点击事件创建点位
+        this.isSelectingPoint = false
+        
+        // 恢复默认光标样式
+        document.getElementById('map').style.cursor = ''
+        
+        // 移除ESC键事件监听
+        document.removeEventListener('keydown', cancelSelectionHandler)
+        
+        // 弹出对话框让用户输入点位信息
+        this.$prompt('请输入点位名称', '添加服务范围分析点位', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          inputPlaceholder: '例如：xxx充电站',
+          center: true
+        }).then(({ value }) => {
+          if (!value) {
+            this.$message.warning('名称不能为空')
+            return
+          }
+          
+          // 为服务范围分析添加点位，只能是充电站类型
+          const point = {
+            id: `service_analysis_${Date.now()}`,
+            name: value,
+            lat: e.latlng.lat,
+            lng: e.latlng.lng,
+            type: '充电站'
+          }
+          
+          // 添加到手动点位列表
+          this.manualPoints.push(point)
+          
+          // 显示临时标记
+          this.addPointMarkerToServiceAnalysis(point)
+          
+          // 不再自动添加到充电站图层
+          
+          this.$message.success('服务范围分析点位添加成功')
+          
+          // 重新打开服务范围分析对话框
+          this.showServiceRangeDialog = true
+        }).catch(() => {
+          // 用户取消，恢复默认光标并重新打开对话框
+          document.getElementById('map').style.cursor = ''
+          this.showServiceRangeDialog = true
+        })
+      })
+      
+      this.$message.info('请在地图上点击选择服务范围分析点位')
+    },
+    
+    // 将点位添加到充电站图层
+    addPointToChargingLayer(point) {
+      // 如果充电站图层未激活，激活它
+      if (!this.activeLayerIds.has('charging')) {
+        this.activeLayerIds.add('charging')
+        this.layerInstances.charging.addTo(this.map)
+      }
+      
+      // 创建充电站对象并添加到数据集
+      const stationPoint = {
+        id: point.id,
+        name: point.name,
+        latitude: point.lat,
+        longitude: point.lng,
+        lat: point.lat,
+        lng: point.lng,
+        type: '充电站',
+        source: 'manual'
+      }
+      
+      // 添加到充电站数据集
+      this.chargingStations.push(stationPoint)
+      
+      // 创建图标
+      const icon = L.icon({
+        iconUrl: require('@/assets/充电站.svg'),
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -32]
+      })
+      
+      // 创建标记
+      const marker = L.marker([point.lat, point.lng], {
+        icon: icon
+      })
+      
+      // 创建弹出窗口内容
+      const popupContent = `
+        <div class="poi-popup">
+          <h3>${point.name}</h3>
+          <p><strong>类型：</strong>充电站</p>
+          <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+          <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+          <p><strong>来源：</strong>服务范围分析添加</p>
+        </div>
+      `
+      
+      // 绑定弹出窗口
+      marker.bindPopup(popupContent)
+      
+      // 添加到充电站图层
+      marker.addTo(this.layerInstances.charging)
+      
+      // 更新数据表格
+      this.pointData.push({
+        id: stationPoint.id,
+        name: stationPoint.name,
+        type: '充电站',
+        lat: stationPoint.latitude,
+        lng: stationPoint.longitude,
+        source: '服务范围分析添加'
+      })
+      
+      // 保存到后端数据库
+      this.savePointToBackend({
+        name: point.name,
+        latitude: point.lat,
+        longitude: point.lng,
+        type: '充电站'
+      }, 'charging')
+    },
+    handleMapClick(e) {
+      if (this.isSelectingPoint) {
+        // 已经在 startPointSelection 方法中处理了
+        return
+      }
+      
+      // 处理添加点位工具的点击事件
+      if (this.currentTool === 'point') {
+        this.handleMapClickAddPoint(e)
+        return
+      }
+    },
+    removeManualPoint(index) {
+      this.manualPoints.splice(index, 1)
+    },
+    
+    // 添加点位标记到服务分析图层
+    addServiceAnalysisPointMarker(point) {
+      // 如果没有服务分析图层，创建一个
+      if (!this.layerInstances.serviceAnalysis) {
+        this.layerInstances.serviceAnalysis = L.layerGroup()
+      }
+      
+      // 创建充电站图标
+      const icon = L.icon({
+        iconUrl: require('@/assets/充电站.svg'),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12]
+      })
+      
+      // 创建标记
+      const marker = L.marker([point.lat, point.lng], {
+        icon: icon
+      })
+      
+      // 创建弹出窗口内容
+      const popupContent = `
+        <div class="poi-popup">
+          <h3>${point.name}</h3>
+          <p><strong>类型：</strong>${point.type}</p>
+          <p><strong>服务范围半径：</strong>${this.serviceRangeRadius}米</p>
+          <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+          <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+        </div>
+      `
+      
+      // 绑定弹出窗口
+      marker.bindPopup(popupContent)
+      
+      // 添加提示标签
+      marker.bindTooltip(`服务分析点位: ${point.name}`, {
+        permanent: false,
+        direction: 'top'
+      })
+      
+      // 添加到服务分析图层
+      marker.addTo(this.layerInstances.serviceAnalysis)
+    },
+    
+    clearServiceRange() {
+      if (this.serviceRangeLayer) {
+        this.map.removeLayer(this.serviceRangeLayer)
+      }
+      if (this.serviceRangeLinesLayer) {
+        this.map.removeLayer(this.serviceRangeLinesLayer)
+      }
+      if (this.layerInstances.serviceAnalysis) {
+        this.map.removeLayer(this.layerInstances.serviceAnalysis)
+        this.layerInstances.serviceAnalysis = null
+      }
+      
+      // 清除服务标记
+      if (this.serviceLayerGroup) {
+        this.serviceLayerGroup.clearLayers()
+      }
+      
+      // 清空服务标记集合
+      this.serviceMarkers = {}
+      
+      // 不再清空手动点位，保留它们
+      // this.manualPoints = []
+      
+      this.isServiceRangeActive = false
+    },
+    
+    // 完全清除所有服务分析数据，包括手动点位
+    clearAllServiceAnalysis() {
+      // 先调用基本的清除方法
+      this.clearServiceRange();
+      
+      // 再清空手动点位
+      this.manualPoints = [];
+      
+      this.$message.success('已清除所有服务范围分析数据');
+    },
+    applyServiceRange() {
+      // 清除之前的服务范围分析结果
+      this.clearServiceRange();
+      
+      this.isServiceRangeActive = true
+      
+      // 根据分析模式处理图层
+      if (this.analysisMode === 'recommended') {
+        // 推荐选址模式下，确保图层已经初始化和激活
+        if (!this.layerInstances.recommended || this.layerInstances.recommended.getLayers().length === 0) {
+          console.log('正在加载推荐选址数据...')
+          this.updateRecommendedLocationsFromLocal()
+          
+          // 确保图层添加到地图上
+          if (this.layerInstances.recommended && !this.map.hasLayer(this.layerInstances.recommended)) {
+            this.layerInstances.recommended.addTo(this.map)
+            this.activeLayerIds.add('recommended')
+          }
+        }
+      }
+      
+      // 无论哪种模式，确保人口分布图层已加载（用于范围分析）
+      if (!this.layerInstances.population || this.layerInstances.population.getLayers().length === 0) {
+        console.log('正在加载人口分布数据...')
+        this.updatePopulationLayer()
+      }
+      
+      // 确保人口分布图层添加到地图上
+      if (this.layerInstances.population && !this.map.hasLayer(this.layerInstances.population)) {
+        this.layerInstances.population.addTo(this.map)
+        this.activeLayerIds.add('population')
+      }
+      
+      // 重新添加手动点位标记
+      if (this.analysisMode === 'manual' && this.manualPoints.length > 0) {
+        // 清除现有的标记
+        if (this.serviceLayerGroup) {
+          this.serviceLayerGroup.clearLayers();
+        }
+        
+        // 将手动点位重新添加到地图上
+        this.manualPoints.forEach(point => {
+          this.addPointMarkerToServiceAnalysis(point);
+        });
+      }
+      
+      // 延迟执行以确保数据加载完成
+      setTimeout(() => {
+        this.updateServiceRange()
+      }, 500) // 增加延迟时间确保数据加载
+    },
+    updateServiceRange() {
+      if (!this.isServiceRangeActive) return
+
+      // 清除之前的服务范围分析结果
+      if (this.serviceRangeLayer) {
+        this.map.removeLayer(this.serviceRangeLayer)
+      }
+      if (this.serviceRangeLinesLayer) {
+        this.map.removeLayer(this.serviceRangeLinesLayer)
+      }
+
+      // 创建新的图层
+      this.serviceRangeLayer = L.layerGroup()
+      this.serviceRangeLinesLayer = L.layerGroup()
+
+      // 获取分析点位
+      const analysisPoints = this.analysisMode === 'recommended' 
+        ? recommendedLocations.map(loc => ({
+            lat: loc.latitude,
+            lng: loc.longitude,
+            id: loc.id,
+            name: loc.name || `推荐选址${loc.id}`
+          }))
+        : this.manualPoints
+
+      // 如果没有分析点位，显示提示并返回
+      if (!analysisPoints || analysisPoints.length === 0) {
+        this.$message.warning('没有可用的分析点位，请先添加点位')
+        this.isServiceRangeActive = false
+        return
+      }
+
+      // 获取所有人口分布点
+      const populationPoints = outputData.map(item => {
+        const coords = geoCoordMap[item.name]
+        return {
+          lat: coords[1],
+          lng: coords[0],
+          name: item.name,
+          value: item.value
+        }
+      })
+
+      // 创建特征组用于计算边界
+      const featureGroup = L.featureGroup()
+
+      // 存储所有在服务范围内的人口点
+      const pointsInRangeSet = new Set()
+      
+      // 存储缓冲区数据，用于可能需要保存到数据库
+      const bufferZones = []
+
+      // 为每个分析点位创建服务范围
+      analysisPoints.forEach(point => {
+        // 创建服务范围圆
+        const circle = L.circle([point.lat, point.lng], {
+          radius: this.serviceRangeRadius,
+          color: '#ffd04b',
+          fillColor: '#ffd04b',
+          fillOpacity: 0.2,
+          weight: 2
+        })
+
+        // 将缓冲区数据添加到数组，用于保存
+        bufferZones.push({
+          point_id: point.id,
+          point_name: point.name,
+          latitude: point.lat,
+          longitude: point.lng,
+          radius: this.serviceRangeRadius,
+          analysis_type: this.analysisMode === 'recommended' ? 'recommended' : 'manual'
+        })
+
+        // 查找在服务范围内的人口点
+        const pointsInRange = populationPoints.filter(popPoint => {
+          const distance = this.calculateDistance(
+            point.lat, point.lng,
+            popPoint.lat, popPoint.lng
+          )
+          if (distance <= this.serviceRangeRadius) {
+            pointsInRangeSet.add(popPoint.name)
+            return true
+          }
+          return false
+        })
+
+        // 创建连线
+        pointsInRange.forEach(popPoint => {
+          const line = L.polyline(
+            [[point.lat, point.lng], [popPoint.lat, popPoint.lng]],
+            {
+              color: '#ffd04b',
+              weight: 2,
+              opacity: 0.6,
+              dashArray: '5, 5'
+            }
+          )
+
+          // 添加连线到图层
+          this.serviceRangeLinesLayer.addLayer(line)
+        })
+
+        // 添加弹出窗口到缓冲区
+        circle.bindPopup(`
+          <div class="buffer-popup">
+            <h3>${point.name || '服务范围'}</h3>
+            <p><strong>半径：</strong>${this.serviceRangeRadius}米</p>
+            <p><strong>覆盖人口点数：</strong>${pointsInRange.length}</p>
+            <p><strong>经度：</strong>${point.lng.toFixed(6)}</p>
+            <p><strong>纬度：</strong>${point.lat.toFixed(6)}</p>
+          </div>
+        `)
+
+        // 添加服务范围圆到图层和特征组
+        this.serviceRangeLayer.addLayer(circle)
+        featureGroup.addLayer(circle)
+      })
+
+      // 更新人口分布图层，只显示在服务范围内的点
+      this.layerInstances.population.clearLayers()
+      populationPoints.forEach(popPoint => {
+        if (pointsInRangeSet.has(popPoint.name)) {
+          const circle = L.circleMarker([popPoint.lat, popPoint.lng], {
+            radius: 5,
+            fillColor: this.getColorByValue(popPoint.value),
+            color: '#fff',
+            weight: 1,
+            opacity: 0.8,
+            fillOpacity: 0.6
+          })
+
+          const popupContent = `
+            <div class="poi-popup">
+              <h3>${popPoint.name}</h3>
+              <p><strong>人口指数：</strong>${popPoint.value}</p>
+              <p><strong>经度：</strong>${popPoint.lng}</p>
+              <p><strong>纬度：</strong>${popPoint.lat}</p>
+            </div>
+          `
+
+          circle.bindPopup(popupContent, {
+            closeButton: true,
+            closeOnClick: true,
+            autoClose: true,
+            autoPan: false,
+            keepInView: false,
+            className: 'custom-popup'
+          })
+
+          circle.addTo(this.layerInstances.population)
+        }
+      })
+
+      // 将图层添加到地图
+      this.serviceRangeLayer.addTo(this.map)
+      this.serviceRangeLinesLayer.addTo(this.map)
+
+      // 调整视图以显示所有服务范围
+      const bounds = featureGroup.getBounds()
+      if (bounds.isValid()) {
+        this.map.fitBounds(bounds, {
+          padding: [50, 50],
+          maxZoom: 14
+        })
+      }
+      
+      // 生成分析结果报告
+      this.generateServiceRangeReport(analysisPoints, pointsInRangeSet.size, bufferZones)
+      
+      this.$message.success(`服务范围分析完成，共分析了${analysisPoints.length}个点位，覆盖了${pointsInRangeSet.size}个人口点`)
+    },
+    
+    // 生成服务范围分析报告
+    generateServiceRangeReport(points, coveredPopulation, bufferZones) {
+      console.log('========= 服务范围分析报告 =========')
+      console.log(`分析模式: ${this.analysisMode === 'recommended' ? '推荐选址' : '手动选点'}`)
+      console.log(`服务半径: ${this.serviceRangeRadius} 米`)
+      console.log(`分析点位数量: ${points.length}`)
+      console.log(`覆盖人口点数量: ${coveredPopulation}`)
+      console.log('===================================')
+      
+      // 如果需要，可以将缓冲区数据保存到后端
+      this.saveBufferZonesToBackend(bufferZones)
+    },
+    
+    // 保存缓冲区数据到后端
+    saveBufferZonesToBackend(bufferZones) {
+      if (!bufferZones || bufferZones.length === 0) return
+      
+      // 准备要发送的数据
+      const data = {
+        analysis_type: this.analysisMode,
+        radius: this.serviceRangeRadius,
+        buffer_zones: bufferZones
+      }
+      
+      // 发送数据到后端
+      axios.post('http://localhost:3000/api/service-range-analysis', data)
+        .then(response => {
+          console.log('服务范围分析数据已保存到后端:', response.data)
+        })
+        .catch(error => {
+          console.error('保存服务范围分析数据失败:', error)
+        })
+    },
+    formatRadius(value) {
+      return `${value}米`
+    },
+    calculateDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371000 // 地球半径（米）
+      const lat1Rad = this.toRadians(lat1)
+      const lat2Rad = this.toRadians(lat2)
+      const deltaLat = this.toRadians(lat2 - lat1)
+      const deltaLng = this.toRadians(lng2 - lng1)
+
+      const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+            Math.cos(lat1Rad) * Math.cos(lat2Rad) *
+            Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+      return R * c
+    },
+    
+    // 将角度转换为弧度
+    toRadians(degrees) {
+      return degrees * Math.PI / 180
+    },
+    // 创建图标
+    createIcon(type) {
+      let iconUrl;
+      
+      switch (type) {
+        case 'charging':
+          iconUrl = require('@/assets/充电站.svg');
+          break;
+        case 'parking':
+          iconUrl = require('@/assets/停车场.svg');
+          break;
+        case 'recommended':
+          iconUrl = require('@/assets/推荐选址.svg');
+          break;
+        default:
+          iconUrl = require('@/assets/定位.svg');
+      }
+      
+      return L.icon({
+        iconUrl,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12]
+      });
+    },
+    handleFileChange(file) {
+      if (!file) {
+        this.canConfirmImport = false
+        return
+      }
+      
+      console.log('选择的文件:', file)
+      
+      // 确认文件类型是否正确
+      if (file.raw.type !== 'text/plain' && !file.raw.name.endsWith('.txt')) {
+        this.$message.error('请上传txt格式的文件')
+        this.canConfirmImport = false
+        return
+      }
+      
+      // 设置可以确认导入
+      this.canConfirmImport = true
+      
+      // 使用FileReader读取文件
+      const reader = new FileReader()
+      
+      reader.onload = e => {
+        try {
+          const content = e.target.result
+          console.log('文件内容:', content)
+          
+          // 解析文件内容
+          this.parseImportedFile(content, this.importDataType)
+          
+          // 关闭导入对话框
+          this.showImportDialogVisible = false
+        } catch (error) {
+          console.error('解析文件失败:', error)
+          this.$message.error('解析文件失败: ' + error.message)
+        }
+      }
+      
+      reader.onerror = () => {
+        this.$message.error('读取文件失败')
+        this.canConfirmImport = false
+      }
+      
+      reader.readAsText(file.raw)
+    },
+    
+    // 解析导入的文件内容
+    parseImportedFile(content, dataType) {
+      try {
+        // 按行分割
+        const lines = content.trim().split('\n')
+        const importedData = []
+        
+        // 解析每行数据
+        lines.forEach((line, index) => {
+          try {
+            // 跳过空行和注释行
+            if (!line.trim() || line.trim().startsWith('#')) return
+            
+            // 解析逗号或制表符分隔的数据
+            const parts = line.split(/[,\t]/).map(part => part.trim())
+            
+            // 检查数据格式是否正确
+            if (parts.length < 3) {
+              console.warn(`第${index + 1}行数据格式不正确:`, line)
+              return
+            }
+            
+            // 尝试解析经纬度
+            const name = parts[0]
+            const lng = parseFloat(parts[1])
+            const lat = parseFloat(parts[2])
+            const address = parts[3] || ''
+            
+            // 验证经纬度是否有效
+            if (isNaN(lat) || isNaN(lng) || 
+                lat < -90 || lat > 90 || 
+                lng < -180 || lng > 180) {
+              console.warn(`第${index + 1}行经纬度无效:`, line)
+              return
+            }
+            
+            // 添加到导入数据数组
+            importedData.push({
+              id: `imported_${Date.now()}_${index}`,
+              name: name,
+              latitude: lat,
+              longitude: lng,
+              address: address,
+              source: 'imported',
+              type: dataType === 'charging' ? '充电站' : '停车场'
+            })
+          } catch (error) {
+            console.error(`解析第${index + 1}行失败:`, error)
+          }
+        })
+        
+        // 检查是否解析到有效数据
+        if (importedData.length === 0) {
+          this.$message.error('未能解析出任何有效数据')
+          return
+        }
+        
+        // 设置导入数据列表并显示确认对话框
+        this.importedDataList = importedData
+        this.showImportConfirmDialog = true
+        
+        // 提示用户导入成功
+        this.$message.success(`成功解析出${importedData.length}条${dataType === 'charging' ? '充电站' : '停车场'}数据`)
+        
+        // 关闭导入对话框
+        this.showImportDialogVisible = false
+      } catch (error) {
+        console.error('解析导入文件失败:', error)
+        this.$message.error('解析导入文件失败: ' + error.message)
+      }
+    },
+    
+    // 将导入的数据添加到地图上
+    addImportedDataToMap(dataList, dataType) {
+      console.log('开始将数据添加到地图', dataList, dataType);
+      if (!dataList || dataList.length === 0) return;
+      
+      // 确定要添加到的图层
+      const layerKey = dataType === 'charging' ? 'charging' : 'parking';
+      
+      // 创建标记并添加到地图
+      dataList.forEach(item => {
+        const marker = L.marker([item.latitude, item.longitude], {
+          icon: this.getMarkerIcon(dataType)
+        });
+        
+        // 添加点击事件和弹出框
+        marker.bindPopup(`
+          <div class="marker-popup">
+            <h3>${item.name}</h3>
+            <p>地址: ${item.address || '未知'}</p>
+            <p>坐标: ${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}</p>
+          </div>
+        `);
+        
+        // 添加到相应图层
+        if (!this.layerInstances[layerKey]) {
+          this.layerInstances[layerKey] = L.layerGroup().addTo(this.map);
+        }
+        
+        marker.addTo(this.layerInstances[layerKey]);
+        
+        // 存储marker引用
+        if (!this.markers[layerKey]) {
+          this.markers[layerKey] = [];
+        }
+        this.markers[layerKey].push({
+          id: item.id,
+          marker: marker,
+          data: item
+        });
+      });
+      
+      // 更新表格数据
+      this.updateDataTable();
+      
+      // 如果数据较多，调整地图视图以显示所有点
+      if (dataList.length > 1) {
+        const bounds = L.latLngBounds(dataList.map(item => [item.latitude, item.longitude]));
+        this.map.fitBounds(bounds, { padding: [50, 50] });
+      } else if (dataList.length === 1) {
+        this.map.setView([dataList[0].latitude, dataList[0].longitude], 15);
+      }
+      
+      console.log(`成功添加${dataList.length}个点到${dataType}图层`);
+    },
+    
+    // 获取标记图标
+    getMarkerIcon(type) {
+      switch(type) {
+        case 'charging':
+          return L.icon({
+            iconUrl: '/assets/icons/charging-station.png',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+            popupAnchor: [0, -32]
+          });
+        case 'parking':
+          return L.icon({
+            iconUrl: '/assets/icons/parking.png',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+            popupAnchor: [0, -32]
+          });
+        default:
+          return L.icon({
+            iconUrl: '/assets/icons/marker.png',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+            popupAnchor: [0, -32]
+          });
+      }
+    },
+    
+    // 更新数据表格
+    updateDataTable() {
+      // 显示数据表格
+      this.showDataTable = true;
+      
+      // 根据当前选择的数据类型更新表格数据
+      if (this.importDataType === 'charging') {
+        this.pointData = this.chargingStations.map(station => {
+          return {
+            ...station,
+            type: '充电站'
+          };
+        });
+      } else if (this.importDataType === 'parking') {
+        this.pointData = this.parkingLots.map(parking => {
+          return {
+            ...parking,
+            type: '停车场'
+          };
+        });
+      } else if (this.importDataType === 'recommended') {
+        this.pointData = this.recommendedLocations.map(location => {
+          return {
+            ...location,
+            type: '推荐位置'
+          };
+        });
+      }
+      
+      // 刷新表格数据
+      this.$nextTick(() => {
+        if (this.$refs.dataTable) {
+          this.$refs.dataTable.refreshTable();
+        }
+      });
+    },
+    
+    // 根据标记数据获取类型文本
+    getTypeText(data) {
+      if (data.type) return data.type;
+      // 根据ID或其他属性推断类型
+      if (data.id && data.id.includes('charging')) return '充电站';
+      if (data.id && data.id.includes('parking')) return '停车场';
+      return '未知';
+    },
+    
+    // 处理地图上点击添加点位
+    handleMapClickAddPoint(e) {
+      if (!this.currentTool || this.currentTool !== 'point') {
+        return
+      }
+      
+      const latlng = e.latlng
+      
+      // 弹出数据类型选择对话框
+      this.$confirm('请选择要添加的数据类型', '选择数据类型', {
+        confirmButtonText: '充电站',
+        cancelButtonText: '停车场',
+        distinguishCancelAndClose: true,
+        type: 'info',
+        center: true
+      }).then(() => {
+        // 用户选择了充电站
+        this.addPointWithNamePrompt(latlng, 'charging')
+      }).catch(action => {
+        if (action === 'cancel') {
+          // 用户选择了停车场
+          this.addPointWithNamePrompt(latlng, 'parking')
+        }
+        // 如果用户关闭了对话框，不进行任何操作
+      })
+    },
+    
+    // 添加带名称提示的点位
+    addPointWithNamePrompt(latlng, dataType) {
+      // 弹出对话框让用户输入点位名称
+      this.$prompt('请输入点位名称', `添加${dataType === 'charging' ? '充电站' : '停车场'}`, {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPlaceholder: `例如：xxx${dataType === 'charging' ? '充电站' : '停车场'}`,
+        center: true
+      }).then(({ value }) => {
+        if (!value) {
+          this.$message.warning('名称不能为空')
+          return
+        }
+        
+        // 创建点位对象
+      const point = {
+        id: `manual_${Date.now()}`,
+          name: value,
+        latitude: latlng.lat,
+        longitude: latlng.lng,
+        type: dataType === 'charging' ? '充电站' : '停车场',
+        source: 'manual'
+      }
+      
+      // 添加单个点到地图
+      if (!this.activeLayerIds.has(dataType)) {
+        this.activeLayerIds.add(dataType)
+        this.layerInstances[dataType].addTo(this.map)
+      }
+      
+      // 创建自定义图标
+      const icon = L.icon({
+        iconUrl: require(`@/assets/${dataType === 'charging' ? '充电站' : '停车场'}.svg`),
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -32]
+      })
+      
+      // 创建标记
+      const marker = L.marker([point.latitude, point.longitude], {
+        icon: icon
+      })
+      
+      // 创建弹出窗口内容
+      const popupContent = `
+        <div class="poi-popup">
+          <h3>${point.name}</h3>
+          <p><strong>类型：</strong>${point.type}</p>
+          <p><strong>经度：</strong>${point.longitude.toFixed(6)}</p>
+          <p><strong>纬度：</strong>${point.latitude.toFixed(6)}</p>
+          <p><strong>来源：</strong>手动添加</p>
+        </div>
+      `
+      
+      // 绑定弹出窗口
+      marker.bindPopup(popupContent)
+      
+      // 添加到图层
+      marker.addTo(this.layerInstances[dataType])
+      
+      // 打开弹出窗口
+      marker.openPopup()
+      
+        // 存储到相应数据集和标记集合
+      if (dataType === 'charging') {
+        this.chargingStations.push(point)
+          
+          // 保存到markers集合
+          if (!this.markers.charging) {
+            this.markers.charging = []
+          }
+          this.markers.charging.push({
+            id: point.id,
+            marker: marker,
+            data: point
+          })
+          
+          // 自动添加到服务范围分析中的手动选点
+          const analysisPoint = {
+            id: point.id,
+            name: point.name,
+            lat: point.latitude,
+            lng: point.longitude,
+            type: '充电站'
+          }
+          
+          // 如果是推荐选址模式，切换到手动选点模式
+          if (this.analysisMode === 'recommended') {
+            this.$confirm('检测到你当前处于推荐选址模式，是否切换到手动选点模式？', '切换模式', {
+              confirmButtonText: '是',
+              cancelButtonText: '否',
+              type: 'info',
+              center: true
+            }).then(() => {
+              this.analysisMode = 'manual'
+            }).catch(() => {
+              // 用户选择不切换，不做处理
+            })
+          }
+          
+          // 添加到手动点位列表
+          this.manualPoints.push(analysisPoint)
+          
+          // 添加到服务范围分析图层
+          this.addServiceAnalysisPointMarker(analysisPoint)
+          
+          this.$message.success(`已将充电站"${point.name}"添加到地图和服务范围分析`)
+      } else if (dataType === 'parking') {
+        this.parkingLots.push(point)
+          
+          // 保存到markers集合
+          if (!this.markers.parking) {
+            this.markers.parking = []
+          }
+          this.markers.parking.push({
+            id: point.id,
+            marker: marker,
+            data: point
+          })
+      }
+      
+      // 更新数据表格
+      this.pointData.push({
+        id: point.id,
+        name: point.name,
+        type: point.type,
+        lat: point.latitude,
+        lng: point.longitude,
+        source: '手动添加'
+      })
+        
+        // 保存到后端数据库
+        this.savePointToBackend(point, dataType)
+      
+      // 提示用户添加成功
+      this.$message.success(`成功添加${point.type}点位: ${point.name}`)
+      }).catch(() => {
+        // 用户取消输入，不做处理
+      })
+    },
+    
+    // 保存点位到后端数据库
+    savePointToBackend(point, dataType) {
+      // 准备要发送的数据
+      const pointData = {
+        name: point.name,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        address: point.address || '',
+        type: dataType === 'charging' ? '充电站' : '停车场'
+      }
+      
+      // 根据数据类型选择API端点
+      const apiUrl = dataType === 'charging'
+        ? 'http://localhost:3000/api/charging-stations'
+        : 'http://localhost:3000/api/parking-lots'
+        
+      // 发送数据到后端
+      axios.post(apiUrl, pointData)
+        .then(response => {
+          console.log('点位数据已成功保存到后端:', response.data)
+          
+          // 如果后端返回了ID，更新本地数据
+          if (response.data && response.data.id) {
+            point.id = response.data.id
+          }
+        })
+        .catch(error => {
+          console.error('保存点位数据到后端失败:', error)
+          // 用户仍然可以在地图上看到点位，所以不显示错误消息
+        })
+    },
+    editPoint(point) {
+      console.log('Edit point:', point)
+      // TODO: 实现点位编辑
+    },
+    deletePoint(point) {
+      if (!point || !point.id) {
+        this.$message.error('删除失败，点位数据不完整')
+        return
+      }
+      
+      // 确认是否删除
+      this.$confirm(`确定要删除 ${point.name || '此点位'} 吗？`, '删除点位', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+        // 确定删除点位
+        let found = false
+        let layerKey = null
+        
+        // 确定点位类型和所在图层
+        if (point.type === '充电站') {
+          layerKey = 'charging'
+          
+          // 从充电站数据集中删除
+          const index = this.chargingStations.findIndex(item => item.id === point.id)
+          if (index !== -1) {
+            this.chargingStations.splice(index, 1)
+            found = true
+          }
+          
+          // 从服务范围分析的手动点位中也删除
+          const manualIndex = this.manualPoints.findIndex(item => item.id === point.id)
+          if (manualIndex !== -1) {
+            this.manualPoints.splice(manualIndex, 1)
+            
+            // 如果有服务范围分析图层，更新它
+            if (this.layerInstances.serviceAnalysis) {
+              this.layerInstances.serviceAnalysis.clearLayers()
+              this.manualPoints.forEach(p => this.addServiceAnalysisPointMarker(p))
+            }
+          }
+        } else if (point.type === '停车场') {
+          layerKey = 'parking'
+          
+          // 从停车场数据集中删除
+          const index = this.parkingLots.findIndex(item => item.id === point.id)
+          if (index !== -1) {
+            this.parkingLots.splice(index, 1)
+            found = true
+          }
+        }
+        
+        // 从地图上移除标记
+        if (layerKey && this.markers[layerKey]) {
+          const markerIndex = this.markers[layerKey].findIndex(m => m.id === point.id)
+          if (markerIndex !== -1) {
+            const marker = this.markers[layerKey][markerIndex].marker
+            this.layerInstances[layerKey].removeLayer(marker)
+            this.markers[layerKey].splice(markerIndex, 1)
+          }
+        }
+        
+        // 从数据表格中删除
+        const dataIndex = this.pointData.findIndex(item => item.id === point.id)
+        if (dataIndex !== -1) {
+          this.pointData.splice(dataIndex, 1)
+        }
+        
+        // 发送删除请求到后端
+        this.deletePointFromBackend(point)
+        
+        // 显示结果提示
+        if (found) {
+          this.$message.success(`成功删除点位: ${point.name || ''}`)
+        } else {
+          this.$message.warning('未找到对应点位数据，但已从界面移除')
+        }
+      }).catch(() => {
+        // 用户取消删除，不做处理
+      })
+    },
+    
+    // 从后端删除点位数据
+    deletePointFromBackend(point) {
+      let apiUrl = ''
+      
+      // 确定API端点
+      if (point.type === '充电站') {
+        apiUrl = `http://localhost:3000/api/charging-stations/${point.id}`
+      } else if (point.type === '停车场') {
+        apiUrl = `http://localhost:3000/api/parking-lots/${point.id}`
+      } else {
+        console.warn('未知点位类型，无法删除后端数据')
+        return
+      }
+      
+      // 发送删除请求
+      axios.delete(apiUrl)
+        .then(response => {
+          console.log('点位数据已从后端删除:', response.data)
+        })
+        .catch(error => {
+          console.error('从后端删除点位数据失败:', error)
+          // 用户已经看到了界面上的成功提示，所以不显示错误消息
+        })
+    },
+    // 获取交通路网数据
+    async fetchTrafficData() {
+      // 使用天地图矢量路网图层替代 WFS 服务
+      const trafficLayer = L.tileLayer('http://t{s}.tianditu.gov.cn/cva_w/wmts?layer=cva&style=default&tilematrixset=w&Service=WMTS&Request=GetTile&Version=1.0.0&Format=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}&tk=95df243f8b72993f9e07a38e30be979c', {
+        subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+        maxZoom: 18,
+      });
+
+      return trafficLayer;
+    },
+
+    // 更新交通路网图层
+    async updateTrafficLayer() {
+      if (!this.map || !this.activeLayerIds.has('traffic')) return;
+
+      // 清除现有的交通路网图层
+      this.layerInstances.traffic.clearLayers();
+
+      try {
+        // 获取交通图层
+        const trafficLayer = await this.fetchTrafficData();
+        
+        // 将图层添加到交通图层组
+        this.layerInstances.traffic.addLayer(trafficLayer);
+        
+        // 如果交通图层被激活，添加到地图
+        if (this.activeLayerIds.has('traffic')) {
+          this.layerInstances.traffic.addTo(this.map);
+        }
+
+      } catch (error) {
+        console.error('加载交通路网失败:', error);
+        // 显示错误提示
+        this.$message.error('加载交通路网失败，请稍后重试');
+      }
+    },
+    convertHeatmapData(data) {
+      const points = []
+      
+      if (!data || typeof data !== 'object') {
+        console.warn('Invalid heatmap data')
+        return points
+      }
+
+      try {
+        Object.entries(data).forEach(([key, item]) => {
+          console.log('Processing entry:', key, item)
+          
+          let lat, lng, intensity = 1
+
+          // 处理第一种格式：直接是坐标数组
+          if (Array.isArray(item)) {
+            [lng, lat] = item
+            console.log('Array format:', lng, lat)
+          } 
+          // 处理第二种格式：包含 name 和 value 的对象
+          else if (item && typeof item === 'object' && 'name' in item && 'value' in item) {
+            // 需要从 geoCoordMap 中查找对应的坐标
+            const coords = data[item.name]
+            if (Array.isArray(coords)) {
+              [lng, lat] = coords
+              intensity = item.value / 1000 // 将 value 转换为合适的强度值
+            }
+            console.log('Object format:', lng, lat, intensity)
+          }
+
+          // 转换为数字并验证
+          lat = parseFloat(lat)
+          lng = parseFloat(lng)
+          
+          // 验证坐标的有效性
+          if (!isNaN(lat) && !isNaN(lng) && 
+              lat >= -90 && lat <= 90 && 
+              lng >= -180 && lng <= 180) {
+            points.push([lat, lng, intensity])
+            console.log('Added point:', [lat, lng, intensity])
+          } else {
+            console.warn('Invalid coordinates:', lat, lng)
+          }
+        })
+      } catch (error) {
+        console.error('Error processing data:', error)
+      }
+      
+      console.log('Final points array:', points)
+      return points
+    },
+    hideHeatmap() {
+      if (this.heatmapLayer) {
+        this.map.removeLayer(this.heatmapLayer)
+        this.heatmapLayer = null
+      }
+    },
+    // 添加充电站方法，优先使用天地图API和静态数据
+    async fetchChargingStations() {
+      if (!this.map) {
+        console.error('地图未初始化')
+        return
+      }
+
+      // 先从天地图API获取数据
+      let tiandituStations = []
+      try {
+        console.log('从天地图API获取充电站数据...')
+        const tiandituResponse = await this.fetchChargingStationsFromTiandituAPI()
+        if (tiandituResponse && tiandituResponse.length > 0) {
+          tiandituStations = tiandituResponse
+          console.log('从天地图获取到充电站数量:', tiandituStations.length)
+        }
+      } catch (error) {
+        console.error('获取天地图数据失败:', error)
+      }
+
+      // 再尝试从后端获取辅助数据
+      let backendStations = []
+      try {
+        console.log('从后端API获取充电站数据...')
+        const response = await axios.get('http://localhost:3000/api/charging-stations')
+        if (response.data && response.data.length > 0) {
+          backendStations = response.data.map(station => {
+            return {
+              id: station.id,
+              name: station.name,
+              lat: station.latitude,
+              lng: station.longitude,
+              type: station.type || '充电站',
+              address: station.address || '暂无地址',
+              phone: station.phone || '暂无',
+              source: 'database' // 标记数据来源
+            }
+          })
+          console.log('从数据库获取到充电站数量:', backendStations.length)
+        }
+      } catch (error) {
+        console.error('获取后端数据失败:', error)
+      }
+
+      // 合并数据 - 优先使用天地图数据，然后将后端数据作为补充
+      // 这确保了天地图数据不会被后端数据覆盖
+      this.chargingStations = this.mergeLocationData(tiandituStations, backendStations)
+      console.log('合并后总共充电站数量:', this.chargingStations.length)
+
+      // 如果没有获取到任何数据，显示错误消息
+      if (this.chargingStations.length === 0) {
+        this.$message.warning('未能获取到充电站数据')
+      } else {
+        // 更新地图显示
+        this.updateChargingStations()
+      }
+    },
+
+    // 从天地图API获取数据，但不直接更新地图
+    async fetchChargingStationsFromTiandituAPI() {
+      try {
+        console.log('从天地图API获取充电站数据...')
+        const response = await axios.get('http://api.tianditu.gov.cn/v2/search', {
+          params: {
+            type: 'query',
+            tk: this.tiandituKey,
+            postStr: JSON.stringify({
+              keyWord: "充电站",
+              queryType: 1,
+              start: 0,
+              count: 100,
+              level: 12,
+              mapBound: '118.5965,31.8584,119.0965,32.2584',
+              queryRadius: 3000,
+              sourceType: 'poi',
+              needSubInfo: 'true',
+              needAll: 'false',
+              needPolygon: 'false',
+              needPre: 'false'
+            })
+          }
+        })
+
+        if (response.data.status.infocode === 1000 && response.data.pois) {
+          return response.data.pois.map(poi => {
+            const station = {
+              id: poi.hotPointID || poi.uid,
+              name: poi.name,
+              lat: poi.lonlat.split(',')[1],
+              lng: poi.lonlat.split(',')[0],
+              type: poi.typeName || '充电站',
+              address: poi.address || '暂无地址',
+              phone: poi.phone || '暂无',
+              province: poi.province,
+              city: poi.city,
+              county: poi.county,
+              source: 'tianditu' // 标记数据来源
+            }
+            return station
+          })
+        }
+        return []
+      } catch (error) {
+        console.error('获取天地图充电站数据失败:', error)
+        return []
+      }
+    },
+
+    // 添加停车场方法，优先使用天地图API和静态数据
+    async fetchParkingLots() {
+      if (!this.map) {
+        console.error('地图未初始化')
+        return
+      }
+
+      // 先从天地图API获取数据
+      let tiandituParkingLots = []
+      try {
+        console.log('从天地图API获取停车场数据...')
+        const tiandituResponse = await this.fetchParkingLotsFromTiandituAPI()
+        if (tiandituResponse && tiandituResponse.length > 0) {
+          tiandituParkingLots = tiandituResponse
+          console.log('从天地图获取到停车场数量:', tiandituParkingLots.length)
+        }
+        } catch (error) {
+        console.error('获取天地图数据失败:', error)
+      }
+
+      // 再尝试从后端获取辅助数据
+      let backendParkingLots = []
+      try {
+        console.log('从后端API获取停车场数据...')
+        const response = await axios.get('http://localhost:3000/api/parking-lots')
+        if (response.data && response.data.length > 0) {
+          backendParkingLots = response.data.map(parking => {
+            return {
+              id: parking.id,
+              name: parking.name,
+              lat: parking.latitude,
+              lng: parking.longitude,
+              type: '停车场',
+              address: parking.address || '暂无地址',
+              phone: parking.phone || '暂无',
+              capacity: parking.capacity,
+              available_spaces: parking.available_spaces,
+              source: 'database' // 标记数据来源
+            }
+          })
+          console.log('从数据库获取到停车场数量:', backendParkingLots.length)
+        }
+      } catch (error) {
+        console.error('获取后端数据失败:', error)
+      }
+
+      // 合并数据 - 优先使用天地图数据，然后将后端数据作为补充
+      this.parkingLots = this.mergeLocationData(tiandituParkingLots, backendParkingLots)
+      console.log('合并后总共停车场数量:', this.parkingLots.length)
+
+      // 如果没有获取到任何数据，显示错误消息
+      if (this.parkingLots.length === 0) {
+        this.$message.warning('未能获取到停车场数据')
+      } else {
+        // 更新地图显示
+        this.updateParkingLots()
+      }
+    },
+
+    // 从天地图API获取停车场数据，但不直接更新地图
+    async fetchParkingLotsFromTiandituAPI() {
+      try {
+        console.log('从天地图API获取停车场数据...')
+        const response = await axios.get('http://api.tianditu.gov.cn/v2/search', {
+          params: {
+            type: 'query',
+            tk: this.tiandituKey,
+            postStr: JSON.stringify({
+              keyWord: "停车场",
+              queryType: 1,
+              start: 0,
+              count: 100,
+              level: 12,
+              mapBound: '118.5965,31.8584,119.0965,32.2584',
+              queryRadius: 3000,
+              sourceType: 'poi',
+              needSubInfo: 'true',
+              needAll: 'false',
+              needPolygon: 'false',
+              needPre: 'false'
+            })
+          }
+        })
+
+        if (response.data.status.infocode === 1000 && response.data.pois) {
+          return response.data.pois.map(poi => {
+            const parking = {
+              id: poi.hotPointID || poi.uid,
+              name: poi.name,
+              lat: poi.lonlat.split(',')[1],
+              lng: poi.lonlat.split(',')[0],
+              type: poi.typeName || '停车场',
+              address: poi.address || '暂无地址',
+              phone: poi.phone || '暂无',
+              province: poi.province,
+              city: poi.city,
+              county: poi.county,
+              source: 'tianditu' // 标记数据来源
+            }
+            return parking
+          })
+        }
+        return []
+      } catch (error) {
+        console.error('获取天地图停车场数据失败:', error)
+        return []
+      }
+    },
+
+    // 添加推荐选址方法，优先使用静态数据
+    async updateRecommendedLocations() {
+      console.log('开始加载推荐选址图层')
+      if (!this.map || !this.layerInstances || !this.layerInstances.recommended) {
+        console.error('地图或图层未初始化')
+        return
+      }
+
+      // 清除现有图层
+      this.layerInstances.recommended.clearLayers()
+
+      // 加载本地和从后端获取的推荐位置
+      this.updateRecommendedLocationsFromLocal()
+    },
+    
+    // 从本地数据更新推荐选址图层
+    updateRecommendedLocationsFromLocal() {
+      console.log('从本地数据加载推荐选址点')
+      
+      // 检查地图和图层是否已初始化
+      if (!this.layerInstances) {
+        this.layerInstances = {}
+      }
+      
+      // 如果图层不存在，创建它
+      if (!this.layerInstances.recommended) {
+        this.layerInstances.recommended = L.layerGroup()
+      }
+      
+      // 清除现有图层数据
+      this.layerInstances.recommended.clearLayers()
+      
+      // 检查数据是否存在
+      if (!this.recommendedLocations || this.recommendedLocations.length === 0) {
+        console.warn('没有可用的推荐选址数据')
+        return
+      }
+      
+      // 添加点位到图层
+      this.recommendedLocations.forEach(location => {
+        try {
+          // 创建标记
+          const marker = L.marker([location.latitude, location.longitude], {
+            icon: this.createIcon('recommended')
+          })
+          
+          // 绑定弹出窗口
+          marker.bindPopup(`
+            <div class="recommended-popup">
+              <h3>${location.id || '推荐位置'}</h3>
+              <p>经度：${location.longitude}</p>
+              <p>纬度：${location.latitude}</p>
+            </div>
+          `)
+
+          // 添加标记到图层
+          marker.addTo(this.layerInstances.recommended)
+          
+        } catch (error) {
+          console.error('添加推荐选址标记时出错:', error)
+        }
+      })
+      
+      // 确保图层添加到地图上
+      if (!this.map.hasLayer(this.layerInstances.recommended)) {
+        this.layerInstances.recommended.addTo(this.map)
+      }
+      
+      console.log(`已加载 ${this.recommendedLocations.length} 个推荐选址点`)
+      
+      // 如果有多个点位，调整地图视图以显示所有点位
+      if (this.activeLayerIds.has('recommended') && this.recommendedLocations.length > 0) {
+        const bounds = L.latLngBounds(
+          this.recommendedLocations.map(loc => [loc.latitude, loc.longitude])
+        )
+        if (bounds.isValid()) {
+          this.map.fitBounds(bounds, { padding: [50, 50] })
+        }
+      }
+    },
+
+    // 合并位置数据（去重）
+    mergeLocationData(primary, secondary) {
+      if (!primary || primary.length === 0) return secondary || []
+      if (!secondary || secondary.length === 0) return primary || []
+      
+      // 复制主要数据源
+      const result = [...primary]
+      
+      // 使用地图匹配去重 (约50米半径内视为同一地点)
+      const MIN_DISTANCE = 0.0005 // 大约50米的经纬度差
+      
+      // 比较每个次要数据源项，如果位置不重复则添加
+      secondary.forEach(item => {
+        const isDuplicate = primary.some(pItem => {
+          // 名称完全相同
+          if (pItem.name && item.name && pItem.name === item.name) {
+            return true
+          }
+          
+          // 坐标非常接近
+          const latDiff = Math.abs(parseFloat(pItem.lat) - parseFloat(item.lat))
+          const lngDiff = Math.abs(parseFloat(pItem.lng) - parseFloat(item.lng))
+          
+          return latDiff < MIN_DISTANCE && lngDiff < MIN_DISTANCE
+        })
+        
+        if (!isDuplicate) {
+          result.push(item)
+        }
+      })
+      
+      return result
+    },
+    
+    // 合并推荐选址数据（去重）
+    mergeRecommendedLocations(primary, secondary) {
+      if (!primary || primary.length === 0) return secondary || []
+      if (!secondary || secondary.length === 0) return primary || []
+      
+      // 复制主要数据源
+      const result = [...primary]
+      
+      // 使用地图匹配去重 (约50米半径内视为同一地点)
+      const MIN_DISTANCE = 0.0005 // 大约50米的经纬度差
+      
+      // 比较每个次要数据源项，如果位置不重复则添加
+      secondary.forEach(item => {
+        const isDuplicate = primary.some(pItem => {
+          // 名称完全相同
+          if (pItem.name && item.name && pItem.name === item.name) {
+            return true
+          }
+          
+          // 坐标非常接近
+          const latDiff = Math.abs(parseFloat(pItem.latitude) - parseFloat(item.latitude))
+          const lngDiff = Math.abs(parseFloat(pItem.longitude) - parseFloat(item.longitude))
+          
+          return latDiff < MIN_DISTANCE && lngDiff < MIN_DISTANCE
+        })
+        
+        if (!isDuplicate) {
+          result.push(item)
+        }
+      })
+      
+      return result
+    },
+    // 添加人口分布图层更新方法
+    updatePopulationLayer() {
+      console.log('开始更新人口分布图层')
+      
+      // 检查地图和图层是否初始化
+      if (!this.map) {
+        console.error('地图尚未初始化')
+        return
+      }
+
+      // 确保图层实例已创建
+      if (!this.layerInstances.population) {
+        this.layerInstances.population = L.layerGroup()
+      }
+      
+      // 清除现有图层数据
+      this.layerInstances.population.clearLayers()
+
+      if (!outputData || outputData.length === 0) {
+        console.warn('没有人口分布数据可用')
+        return
+      }
+      
+      console.log(`加载 ${outputData.length} 个人口分布点`)
+      
+      // 获取数据的最大值和最小值，用于颜色渐变
+      const values = outputData.map(item => item.value)
+      const maxValue = Math.max(...values)
+      const minValue = Math.min(...values)
+
+      // 添加人口分布点到图层
+      outputData.forEach(item => {
+        try {
+          const coords = geoCoordMap[item.name]
+          if (!coords) {
+            console.warn(`未找到 ${item.name} 的坐标数据`)
+            return
+          }
+
+          // 计算归一化值，用于确定颜色
+          const normalizedValue = (item.value - minValue) / (maxValue - minValue)
+          const color = this.getColorByValue(normalizedValue)
+          
+          // 创建圆形标记
+          const circle = L.circleMarker([coords[1], coords[0]], {
+            radius: 5 + normalizedValue * 5, // 根据值调整大小
+            fillColor: color,
+            color: '#fff',
+            weight: 1,
+            opacity: 0.8,
+            fillOpacity: 0.6
+          })
+
+          // 创建弹出窗口内容
+          const popupContent = `
+            <div class="poi-popup">
+              <h3>${item.name}</h3>
+              <p><strong>人口指数：</strong>${item.value}</p>
+              <p><strong>经度：</strong>${coords[0].toFixed(6)}</p>
+              <p><strong>纬度：</strong>${coords[1].toFixed(6)}</p>
+            </div>
+          `
+
+          // 绑定弹出窗口
+          circle.bindPopup(popupContent)
+          
+          // 添加到图层
+          circle.addTo(this.layerInstances.population)
+          
+        } catch (error) {
+          console.error('添加人口分布点失败:', error)
+        }
+      })
+      
+      // 确保图层添加到地图上
+      if (!this.map.hasLayer(this.layerInstances.population)) {
+        this.layerInstances.population.addTo(this.map)
+      }
+      
+      console.log('人口分布图层更新完成')
+      
+      // 调整地图视图以显示所有点位
+      if (outputData.length > 0) {
+        const bounds = L.latLngBounds(
+          Object.values(geoCoordMap).map(coord => [coord[1], coord[0]])
+        )
+        if (bounds.isValid()) {
+          this.map.fitBounds(bounds, { padding: [50, 50] })
+        }
+      }
+    },
+    // 根据值获取颜色
+    getColorByValue(value) {
+      // 使用红色到蓝色的渐变
+      const hue = (1 - value) * 240 // 240 是蓝色，0 是红色
+      return `hsl(${hue}, 100%, 50%)`
+    },
+    // 添加搜索处理方法
+    async handleSearch() {
+      if (!this.searchQuery.trim()) {
+        this.$message.warning('请输入搜索关键词')
+        return
+      }
+
+      try {
+        // 清除之前的搜索结果
+        if (this.searchLayer) {
+          this.map.removeLayer(this.searchLayer)
+        }
+
+        const response = await axios.get('http://api.tianditu.gov.cn/v2/search', {
+          params: {
+            type: 'query',
+            tk: this.tiandituKey,
+            postStr: JSON.stringify({
+              keyWord: this.searchQuery,
+              queryType: 1,
+              start: 0,
+              count: 20,
+              level: 12,
+              mapBound: '118.5965,31.8584,119.0965,32.2584',
+              queryRadius: 3000,
+              sourceType: 'poi',
+              needSubInfo: 'true',
+              needAll: 'false',
+              needPolygon: 'false',
+              needPre: 'false'
+            })
+          }
+        })
+
+        if (response.data.status.infocode === 1000 && response.data.pois) {
+          this.searchResults = response.data.pois.map(poi => ({
+            id: poi.hotPointID || poi.uid,
+            name: poi.name,
+            lat: poi.lonlat.split(',')[1],
+            lng: poi.lonlat.split(',')[0],
+            type: poi.typeName || 'POI',
+            address: poi.address || '暂无地址',
+            phone: poi.phone || '暂无'
+          }))
+
+          // 创建搜索结果图层
+          this.searchLayer = L.layerGroup()
+          
+          // 创建搜索结果的标记
+          const markers = this.searchResults.map(result => {
+            const marker = L.marker([result.lat, result.lng], {
+              icon: L.icon({
+                iconUrl: require('@/assets/定位.svg'), // 使用定位图标
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                popupAnchor: [0, -16]
+              })
+            })
+            
+            const popupContent = `
+              <div class="poi-popup">
+                <h3>${result.name}</h3>
+                <p><strong>类型：</strong>${result.type}</p>
+                <p><strong>地址：</strong>${result.address}</p>
+                <p><strong>电话：</strong>${result.phone}</p>
+              </div>
+            `
+
+            marker.bindPopup(popupContent)
+            return marker
+          })
+
+          // 将标记添加到图层
+          markers.forEach(marker => marker.addTo(this.searchLayer))
+          
+          // 将图层添加到地图
+          this.searchLayer.addTo(this.map)
+
+          // 调整视图以显示所有搜索结果
+          if (markers.length > 0) {
+            const group = L.featureGroup(markers)
+            this.map.fitBounds(group.getBounds(), {
+              padding: [50, 50],
+              maxZoom: 14
+            })
+          }
+
+          this.$message.success(`找到 ${this.searchResults.length} 个结果`)
+        } else {
+          this.$message.warning('未找到相关结果')
+        }
+      } catch (error) {
+        console.error('搜索失败:', error)
+        this.$message.error('搜索失败，请稍后重试')
+      }
+    },
+    // 更新充电站图层方法
+    updateChargingStations() {
+      if (!this.map || !this.layerInstances.charging) {
+        console.error('地图或图层未初始化')
+        return
+      }
+
+      // 清除现有图层上的标记
+      this.layerInstances.charging.clearLayers()
+
+      const chargingIcon = L.icon({
+        iconUrl: require('@/assets/充电站.svg'),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12]
+      })
+
+      // 若没有数据则返回
+      if (!this.chargingStations || this.chargingStations.length === 0) {
+        console.warn('没有可显示的充电站数据')
+        return
+      }
+
+      // 创建标记数组
+      const markers = []
+      this.chargingStations.forEach(station => {
+        try {
+          const marker = L.marker([station.lat, station.lng], {
+            icon: chargingIcon
+          })
+          
+          const popup = L.popup({
+            closeButton: true,
+            closeOnClick: true,
+            autoClose: true,
+            autoPan: false,
+            keepInView: false,
+            className: 'custom-popup'
+          }).setContent(`
+            <div class="poi-popup">
+              <h3>${station.name}</h3>
+              <p><strong>类型：</strong>${station.type}</p>
+              <p><strong>地址：</strong>${station.address}</p>
+              <p><strong>电话：</strong>${station.phone}</p>
+              ${station.source === 'database' ? '<p><strong>来源：</strong>用户添加</p>' : ''}
+            </div>
+          `)
+
+          marker.bindPopup(popup)
+          markers.push(marker)
+        } catch (error) {
+          console.error('添加充电站标记失败:', error, station)
+        }
+      })
+
+      // 批量添加标记到图层
+      if (markers.length > 0) {
+        markers.forEach(marker => marker.addTo(this.layerInstances.charging))
+        
+        // 仅当图层激活并且有markers时才调整视图范围
+        if (this.activeLayerIds.has('charging')) {
+          // 使用featureGroup来计算边界
+          const group = L.featureGroup(markers)
+          
+          // 调整地图视图以适应所有标记
+          setTimeout(() => {
+            try {
+              this.map.fitBounds(group.getBounds(), {
+                padding: [50, 50],
+                maxZoom: 14,
+                animate: false
+              })
+            } catch (error) {
+              console.error('调整地图视图失败:', error)
+            }
+          }, 100)
+        }
+      }
+    },
+
+    // 更新停车场图层方法
+    updateParkingLots() {
+      if (!this.map || !this.layerInstances.parking) {
+        console.error('地图或图层未初始化')
+        return
+      }
+
+      // 清除现有图层上的标记
+      this.layerInstances.parking.clearLayers()
+
+      const parkingIcon = L.icon({
+        iconUrl: require('@/assets/停车场.svg'),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12]
+      })
+
+      // 若没有数据则返回
+      if (!this.parkingLots || this.parkingLots.length === 0) {
+        console.warn('没有可显示的停车场数据')
+        return
+      }
+
+      // 创建标记数组
+      const markers = []
+      this.parkingLots.forEach(parking => {
+        try {
+          const marker = L.marker([parking.lat, parking.lng], {
+            icon: parkingIcon
+          })
+          
+          const popup = L.popup({
+            closeButton: true,
+            closeOnClick: true,
+            autoClose: true,
+            autoPan: false,
+            keepInView: false,
+            className: 'custom-popup'
+          }).setContent(`
+            <div class="poi-popup">
+              <h3>${parking.name}</h3>
+              <p><strong>经度：</strong>${parking.lng}</p>
+              <p><strong>纬度：</strong>${parking.lat}</p>
+              <p><strong>地址：</strong>${parking.address}</p>
+              ${parking.capacity ? `<p><strong>容量：</strong>${parking.capacity}</p>` : ''}
+              ${parking.available_spaces ? `<p><strong>可用车位：</strong>${parking.available_spaces}</p>` : ''}
+              ${parking.source === 'database' ? '<p><strong>来源：</strong>用户添加</p>' : ''}
+            </div>
+          `)
+
+          marker.bindPopup(popup)
+          markers.push(marker)
+        } catch (error) {
+          console.error('添加停车场标记失败:', error, parking)
+        }
+      })
+
+      // 批量添加标记到图层
+      if (markers.length > 0) {
+        markers.forEach(marker => marker.addTo(this.layerInstances.parking))
+        
+        // 仅当图层激活并且有markers时才调整视图范围
+        if (this.activeLayerIds.has('parking')) {
+          // 使用featureGroup来计算边界
+          const group = L.featureGroup(markers)
+          
+          // 调整地图视图以适应所有标记
+          setTimeout(() => {
+            try {
+              this.map.fitBounds(group.getBounds(), {
+                padding: [50, 50],
+                maxZoom: 14,
+                animate: false
+              })
+            } catch (error) {
+              console.error('调整地图视图失败:', error)
+            }
+          }, 100)
+        }
+      }
+    },
+    handleCheckboxChange(layerId, event) {
+      // 阻止事件冒泡，确保只触发复选框的变化
+      if (event) {
+        event.stopPropagation()
+      }
+      this.toggleLayer(layerId)
+    },
+    // 修改菜单项的点击事件处理
+    handleLayerClick(layerId, event) {
+      // 阻止事件冒泡，防止触发其他点击事件
+      if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation()
+      }
+      
+      console.log(`图层 ${layerId} 被点击`)
+      // 切换图层的显示状态
+      this.toggleLayer(layerId)
+    },
+    
+    // 处理Leaflet标记点击事件
+    handleMarkerClick(marker, event) {
+      // 阻止事件冒泡，防止触发地图点击事件
+      if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation()
+      }
+      
+      console.log('标记被点击:', marker)
+      // 这里可以添加标记点击后的逻辑，比如显示详情等
+    },
+    showDataManager() {
+      // 在打开数据管理器之前更新数据
+      // 确保有最新的充电站数据
+      if (this.$refs.dataManager) {
+        this.$refs.dataManager.visible = true;
+        // 如果有已加载的充电站数据，则传递给数据管理器
+        if (this.chargingStations && this.chargingStations.length > 0) {
+          this.$refs.dataManager.pointData = this.chargingStations.map(station => ({
+            id: station.id,
+            name: station.name,
+            type: '充电站',
+            lat: station.lat,
+            lng: station.lng,
+            address: station.address || '暂无地址'
+          }));
+        }
+      }
+    },
+    handleLocate(coords) {
+      // 处理定位事件
+      console.log('定位到:', coords);
+      
+      if (!this.map || !coords.lat || !coords.lng) {
+        return;
+      }
+      
+      // 定位到指定坐标点
+      this.map.setView([coords.lat, coords.lng], 18); // 设置较高的缩放级别以便清晰查看
+      
+      // 创建一个临时标记(如果不存在)或移动现有标记
+      if (!this.tempLocationMarker) {
+        // 根据数据类型选择相应图标
+        let iconUrl;
+        if (coords.type === '充电站') {
+          iconUrl = require('@/assets/充电站.svg');
+        } else if (coords.type === '推荐选址') {
+          iconUrl = require('@/assets/推荐选址.svg');
+        } else if (coords.type === '停车场') {
+          iconUrl = require('@/assets/停车场.svg');
+        } else {
+          iconUrl = require('@/assets/充电站.svg'); // 默认使用充电站图标
+        }
+        
+        // 创建图标
+        const icon = L.icon({
+          iconUrl: iconUrl,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -16]
+        });
+        
+        // 创建标记
+        this.tempLocationMarker = L.marker([coords.lat, coords.lng], {
+          icon: icon,
+          zIndexOffset: 1000 // 确保在其他标记之上
+        }).addTo(this.map);
+        
+        // 添加弹出框
+        if (coords.name) {
+          this.tempLocationMarker.bindPopup(
+            `<div class="poi-popup">
+              <h3>${coords.name}</h3>
+              <p><strong>类型：</strong>${coords.type || '未知'}</p>
+              <p><strong>经度：</strong>${coords.lng}</p>
+              <p><strong>纬度：</strong>${coords.lat}</p>
+              ${coords.address ? `<p><strong>地址：</strong>${coords.address}</p>` : ''}
+            </div>`
+          ).openPopup();
+        }
+      } else {
+        // 移动现有标记并更新弹出框
+        this.tempLocationMarker.setLatLng([coords.lat, coords.lng]);
+        if (coords.name) {
+          this.tempLocationMarker.bindPopup(
+            `<div class="poi-popup">
+              <h3>${coords.name}</h3>
+              <p><strong>类型：</strong>${coords.type || '未知'}</p>
+              <p><strong>经度：</strong>${coords.lng}</p>
+              <p><strong>纬度：</strong>${coords.lat}</p>
+              ${coords.address ? `<p><strong>地址：</strong>${coords.address}</p>` : ''}
+            </div>`
+          ).openPopup();
+        }
+      }
+      
+      // 显示一个通知
+      this.$message.success(`已定位到: ${coords.name || '选中位置'}`);
+    },
+    selectImportMethod(method) {
+      this.importMethod = method
+      // 设置文件导入时默认不能确认，需要选择文件
+      // 设置地图标点时可以直接确认
+      this.canConfirmImport = method === 'map'
+    },
+    cancelImport() {
+      this.showImportDialogVisible = false
+      this.importMethod = null
+    },
+    confirmImport() {
+      if (this.importMethod === 'map') {
+        // 弹出数据类型选择对话框
+        this.$confirm('请选择要添加的数据类型', '选择数据类型', {
+          confirmButtonText: '充电站',
+          cancelButtonText: '停车场',
+          distinguishCancelAndClose: true,
+          type: 'info',
+          center: true
+        }).then(() => {
+          // 用户选择了充电站
+          this.currentDataType = 'charging'
+          this.importDataType = 'charging'
+        // 设置工具为点位添加模式
+        this.currentTool = 'point'
+        // 更改鼠标样式
+        document.getElementById('map').style.cursor = 'crosshair'
+        // 显示提示
+          this.$message.info('请在地图上点击添加充电站点位')
+        }).catch(action => {
+          if (action === 'cancel') {
+            // 用户选择了停车场
+            this.currentDataType = 'parking'
+            this.importDataType = 'parking'
+            // 设置工具为点位添加模式
+            this.currentTool = 'point'
+            // 更改鼠标样式
+            document.getElementById('map').style.cursor = 'crosshair'
+            // 显示提示
+            this.$message.info('请在地图上点击添加停车场点位')
+          }
+          // 如果用户关闭了对话框，不进行任何操作
+        })
+      }
+      
+      this.showImportDialogVisible = false
+    },
+    handleExceed(files, fileList) {
+      this.$message.warning(`当前限制选择 1 个文件，共选择了 ${files.length + fileList.length} 个文件`)
+    },
+    // 显示导入对话框
+    showImportDialog() {
+      // 重置所有相关状态
+      this.importMethod = null
+      this.importDataType = 'charging'
+      this.canConfirmImport = false
+      
+      // 确保显示对话框
+      this.$nextTick(() => {
+        this.showImportDialogVisible = true
+        console.log('对话框已设置为显示:', this.showImportDialogVisible)
+      })
+    },
+    removeImportedItem(index) {
+      this.importedDataList.splice(index, 1)
+    },
+    cancelImportConfirm() {
+      this.showImportConfirmDialog = false
+    },
+    confirmImportData() {
+      console.log('准备导入数据', this.importedDataList);
+      
+      if (!this.importedDataList || this.importedDataList.length === 0) {
+        this.$message.warning('没有可导入的数据');
+        this.importingData = false;
+        return;
+      }
+      
+      try {
+        // 设置导入状态为处理中
+        this.importingData = true;
+        
+        // 将数据添加到地图上
+        this.addImportedDataToMap(this.importedDataList, this.importDataType);
+        
+        // 发送数据到后端API
+        this.sendDataToBackend(this.importedDataList, this.importDataType)
+          .then((response) => {
+            // 导入成功
+            if (response && response.success) {
+              const successMessage = response.message || `${this.importedDataList.length}条数据已成功导入系统`;
+              this.$message.success(successMessage);
+              
+              // 根据数据类型更新本地数据集合
+              if (this.importDataType === 'charging') {
+                // 更新充电站数据
+                this.chargingStations = [...this.chargingStations, ...this.importedDataList];
+                
+                // 询问是否将充电站也添加到服务范围分析
+                this.$confirm('是否将导入的充电站也添加到服务范围分析中?', '添加到服务范围分析', {
+                  confirmButtonText: '是',
+                  cancelButtonText: '否',
+                  type: 'info',
+                  center: true
+                }).then(() => {
+                  // 添加到服务范围分析
+                  let addedCount = 0;
+                  
+                  // 如果当前是推荐选址模式，切换到手动选点模式
+                  if (this.analysisMode !== 'manual') {
+                    this.analysisMode = 'manual'
+                  }
+                  
+                  this.importedDataList.forEach(station => {
+                    const point = {
+                      id: station.id || `service_analysis_${Date.now()}_${addedCount}`,
+                      name: station.name,
+                      lat: parseFloat(station.latitude),
+                      lng: parseFloat(station.longitude),
+                      type: '充电站'
+                    };
+                    
+                    this.manualPoints.push(point);
+                    this.addServiceAnalysisPointMarker(point);
+                    addedCount++;
+                  });
+                  
+                  this.$message.success(`已将${addedCount}个充电站添加到服务范围分析`);
+                }).catch(() => {
+                  // 用户选择不添加，不做处理
+                });
+              } else if (this.importDataType === 'parking') {
+                // 更新停车场数据
+                this.parkingLots = [...this.parkingLots, ...this.importedDataList];
+              }
+            } else {
+              // 显示错误消息
+              const errorMsg = response?.message || '导入数据时发生错误';
+              this.$message.error(errorMsg);
+            }
+          })
+          .catch(error => {
+            console.error('处理后端响应失败:', error);
+            this.$message.warning('数据已显示在地图上，但可能未完全保存到系统');
+            
+            // 尽管后端保存失败，仍然更新本地数据集
+            if (this.importDataType === 'charging') {
+              this.chargingStations = [...this.chargingStations, ...this.importedDataList];
+            } else if (this.importDataType === 'parking') {
+              this.parkingLots = [...this.parkingLots, ...this.importedDataList];
+            }
+          })
+          .finally(() => {
+            // 重置导入状态
+            this.importingData = false;
+            // 清空导入的数据
+            this.importedDataList = [];
+            // 关闭导入对话框
+            this.showImportConfirmDialog = false;
+            // 更新数据表格
+            this.updateDataTable();
+          });
+      } catch (error) {
+        console.error('导入数据失败:', error);
+        this.$message.error('导入数据失败: ' + error.message);
+        this.importingData = false;
+        this.showImportConfirmDialog = false;
+      }
+    },
+    
+    /**
+     * 将导入的数据发送到后端API
+     * @param {Array} data 要发送的数据
+     * @param {String} dataType 数据类型 (charging或parking)
+     * @return {Promise} 后端响应的Promise
+     */
+    sendDataToBackend(data, dataType) {
+      // 确保数据格式符合后端要求，过滤掉无效数据
+      const formattedData = data
+        .filter(item => item && item.name && item.latitude && item.longitude) // 过滤掉没有必要字段的数据
+        .map(item => {
+          // 确保返回的对象只包含后端需要的字段，且所有必要字段都有值
+          return {
+            name: item.name.trim(), // 确保没有空白字符
+            latitude: Number(item.latitude), // 确保是数字
+            longitude: Number(item.longitude), // 确保是数字
+            address: (item.address || '').trim(), // 地址可以为空，但要去除空白
+            type: dataType === 'charging' ? '充电站' : 
+                  dataType === 'parking' ? '停车场' : '推荐位置'
+          };
+        });
+      
+      // 如果没有有效数据，不发送请求
+      if (formattedData.length === 0) {
+        console.warn('没有有效数据可以发送到后端');
+        return Promise.resolve({
+          success: false,
+          message: '没有有效数据可以导入'
+        });
+      }
+      
+      // 配置API端点 - 使用与GET请求相同的基本URL
+      const apiUrl = dataType === 'charging'
+        ? 'http://localhost:3000/api/charging-stations'
+        : dataType === 'parking'
+          ? 'http://localhost:3000/api/parking-lots'
+          : 'http://localhost:3000/api/recommendations';
+      
+      console.log(`发送数据到后端: ${apiUrl}`, formattedData);
+      
+      // 使用axios发送真实请求到后端API，使用标准格式
+      return axios.post(apiUrl, formattedData)
+        .then(response => {
+          console.log('后端响应:', response.data);
+          return response.data;
+        })
+        .catch(error => {
+          console.error('API请求失败:', error);
+          if (error.response) {
+            console.error('错误详情:', error.response.data);
+          }
+          
+          // 如果是开发环境，提供模拟成功响应以便于测试
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('开发环境: 尝试连接后端失败，返回模拟响应');
+            return {
+              success: true,
+              message: `${formattedData.length}条${
+                dataType === 'charging' ? '充电站' : 
+                dataType === 'parking' ? '停车场' : '推荐位置'
+              }数据已添加到地图，但未能保存到数据库`
+            };
+          }
+          // 在生产环境中重新抛出错误
+          throw error;
+        });
+    },
+    // 选择已有充电站作为服务范围分析点位
+    selectExistingStation() {
+      if (!this.chargingStations || this.chargingStations.length === 0) {
+        this.$message.warning('暂无可用的充电站数据，请先添加充电站')
+        return
+      }
+      
+      // 显示弹窗让用户选择充电站
+      this.$confirm('选择已有充电站数据的方式', '选择充电站', {
+        confirmButtonText: '使用全部充电站',
+        cancelButtonText: '取消',
+        distinguishCancelAndClose: true,
+        closeOnClickModal: false,
+        type: 'info',
+        center: true
+      }).then(() => {
+        // 使用全部充电站
+        const addedCount = this.addAllChargingStationsToAnalysis()
+        this.$message.success(`已添加${addedCount}个充电站到服务范围分析`)
+      }).catch(action => {
+        // 如果不是取消，则显示选择特定充电站的对话框
+        if (action !== 'cancel') {
+          this.showSelectSpecificStationDialog()
+        }
+      })
+    },
+    
+    // 添加所有充电站到服务范围分析
+    addAllChargingStationsToAnalysis() {
+      if (!this.chargingStations || this.chargingStations.length === 0) {
+        return 0
+      }
+      
+      // 确保当前是手动选点模式
+      if (this.analysisMode !== 'manual') {
+        this.analysisMode = 'manual'
+      }
+      
+      // 清除现有手动点位
+      this.manualPoints = []
+      if (this.layerInstances.serviceAnalysis) {
+        this.layerInstances.serviceAnalysis.clearLayers()
+      }
+      
+      let addedCount = 0
+      
+      // 添加每个充电站到手动点位列表
+      this.chargingStations.forEach(station => {
+        const point = {
+          id: station.id || `service_analysis_${Date.now()}_${addedCount}`,
+          name: station.name,
+          lat: parseFloat(station.lat || station.latitude),
+          lng: parseFloat(station.lng || station.longitude),
+          type: '充电站'
+        }
+        
+        this.manualPoints.push(point)
+        this.addServiceAnalysisPointMarker(point)
+        addedCount++
+      })
+      
+      return addedCount
+    },
+    
+    // 显示选择特定充电站的对话框
+    showSelectSpecificStationDialog() {
+      // 这里可以实现一个更复杂的选择特定充电站的对话框
+      // 作为简化实现，我们暂时不做这部分，可以在未来扩展
+      this.$message.info('选择特定充电站功能将在后续版本中提供')
+    },
+    // 定位手动选点
+    locateManualPoint(point) {
+      if (!point || !point.lat || !point.lng) {
+        this.$message.error('无法定位，点位坐标无效')
+        return
+      }
+      
+      // 延迟一下再定位，确保UI更新完成
+      setTimeout(() => {
+        // 定位到点位
+        this.map.setView([point.lat, point.lng], 16)
+        
+        // 创建临时标记或移动现有标记
+        if (this.tempLocationMarker) {
+          this.tempLocationMarker.setLatLng([point.lat, point.lng])
+        } else {
+          // 创建图标
+          const icon = L.icon({
+            iconUrl: require('@/assets/充电站.svg'),
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+            popupAnchor: [0, -16]
+          })
+          
+          // 创建标记
+          this.tempLocationMarker = L.marker([point.lat, point.lng], {
+            icon: icon,
+            zIndexOffset: 1000 // 确保在其他标记之上
+          }).addTo(this.map)
+        }
+        
+        // 绑定并打开弹出窗口
+        this.tempLocationMarker.bindPopup(`
+          <div class="poi-popup">
+            <h3>${point.name}</h3>
+            <p><strong>类型：</strong>${point.type || '充电站'}</p>
+            <p><strong>经度：</strong>${point.lng}</p>
+            <p><strong>纬度：</strong>${point.lat}</p>
+          </div>
+        `).openPopup()
+        
+        // 显示成功提示
+        this.$message.success(`已定位到: ${point.name}`)
+      }, 300)
+    },
+    handlePointDeleted(point) {
+      console.log('点位列表中删除的点位ID:', point.id);
+      
+      // 根据点位类型确定图层和标记集合
+      let layerKey = null;
+      
+      if (point.type === '充电站') {
+        layerKey = 'charging';
+        
+        // 从充电站数据集中删除
+        const index = this.chargingStations.findIndex(item => item.id === point.id);
+        if (index !== -1) {
+          this.chargingStations.splice(index, 1);
+        }
+        
+        // 从服务范围分析的手动点位中也删除
+        const manualIndex = this.manualPoints.findIndex(item => item.id === point.id);
+        if (manualIndex !== -1) {
+          this.manualPoints.splice(manualIndex, 1);
+          
+          // 如果有服务范围分析图层，更新它
+          if (this.layerInstances.serviceAnalysis) {
+            this.layerInstances.serviceAnalysis.clearLayers();
+            this.manualPoints.forEach(p => this.addServiceAnalysisPointMarker(p));
+          }
+        }
+      } else if (point.type === '停车场') {
+        layerKey = 'parking';
+        
+        // 从停车场数据集中删除
+        const index = this.parkingLots.findIndex(item => item.id === point.id);
+        if (index !== -1) {
+          this.parkingLots.splice(index, 1);
+        }
+      } else if (point.type === '推荐选址') {
+        layerKey = 'recommended';
+        
+        // 从推荐选址数据集中删除
+        const index = this.recommendedLocations.findIndex(item => item.id === point.id);
+        if (index !== -1) {
+          this.recommendedLocations.splice(index, 1);
+        }
+      }
+      
+      // 从地图上移除标记
+      if (layerKey && this.markers[layerKey]) {
+        const markerIndex = this.markers[layerKey].findIndex(m => m.id === point.id);
+        if (markerIndex !== -1) {
+          const marker = this.markers[layerKey][markerIndex].marker;
+          this.layerInstances[layerKey].removeLayer(marker);
+          this.markers[layerKey].splice(markerIndex, 1);
+        }
+      }
+      
+      // 从数据表格中删除
+      const dataIndex = this.pointData.findIndex(item => item.id === point.id);
+      if (dataIndex !== -1) {
+        this.pointData.splice(dataIndex, 1);
+      }
+      
+      // 从服务标记集合中删除
+      if (this.serviceMarkers && this.serviceMarkers[point.id]) {
+        if (this.serviceLayerGroup) {
+          this.serviceLayerGroup.removeLayer(this.serviceMarkers[point.id].marker);
+          this.serviceLayerGroup.removeLayer(this.serviceMarkers[point.id].circle);
+        }
+        delete this.serviceMarkers[point.id];
+      }
+      
+      // 提示用户
+      this.$message.success(`已从地图上移除点位: ${point.name || ''}`);
+    },
+    handleRadiusChange(radius) {
+      this.serviceRangeRadius = radius;
+      this.updateServiceRange();
+    },
+    initDrawTools() {
+      // 初始化绘图图层
+      this.drawnItems = L.featureGroup().addTo(this.map);
+      
+      // 创建绘制控件
+      this.drawControl = {
+        polygon: new L.Draw.Polygon(this.map, {
+          shapeOptions: {
+            color: '#3388ff',
+            weight: 3,
+            opacity: 0.5,
+            fillOpacity: 0.2
+          }
+        }),
+        circle: new L.Draw.Circle(this.map, {
+          shapeOptions: {
+            color: '#3388ff',
+            weight: 3,
+            opacity: 0.5,
+            fillOpacity: 0.2
+          }
+        })
+      };
+      
+      // 注册绘图完成事件
+      this.map.on(L.Draw.Event.CREATED, (event) => {
+        this.drawing = false;
+        document.getElementById('map').style.cursor = '';
+        
+        const layer = event.layer;
+        this.drawnItems.addLayer(layer);
+        
+        // 保存当前绘制的形状信息
+        this.currentDrawnShape = {
+          type: event.layerType,
+          layer: layer
+        };
+        
+        // 计算区域面积
+        this.calculateDrawnArea();
+        
+        // 搜索区域内的数据
+        this.searchDrawnArea();
+      });
+      
+      // 注册绘图取消事件
+      this.map.on('draw:cancel', () => {
+        this.drawing = false;
+        document.getElementById('map').style.cursor = '';
+        this.currentTool = null;
+      });
+    },
+    
+    // 计算绘制区域面积
+    calculateDrawnArea() {
+      if (!this.currentDrawnShape) return;
+      
+      if (this.currentDrawnShape.type === 'circle') {
+        const circle = this.currentDrawnShape.layer;
+        const radius = circle.getRadius(); // 半径（米）
+        
+        // 存储半径信息
+        this.drawAnalysisRadius = Math.round(radius);
+        
+        // 计算圆面积（平方米）: π*r²
+        this.drawAnalysisArea = Math.round(Math.PI * radius * radius);
+      } else if (this.currentDrawnShape.type === 'polygon') {
+        const polygon = this.currentDrawnShape.layer;
+        const latlngs = polygon.getLatLngs()[0]; // 获取多边形的坐标点
+        
+        // 重置半径信息（多边形没有半径）
+        this.drawAnalysisRadius = 0;
+        
+        // 使用球面几何计算多边形面积（平方米）
+        this.drawAnalysisArea = this.calculatePolygonArea(latlngs);
+      }
+      
+      console.log(`计算区域面积：${this.drawAnalysisArea} 平方米`);
+      
+      // 显示分析结果对话框
+      this.showDrawAnalysisDialog = true;
+    },
+    
+    // 计算多边形面积（平方米）
+    calculatePolygonArea(latlngs) {
+      // 使用Shoelace公式（高斯面积公式）计算
+      const earthRadius = 6371000; // 地球半径，单位米
+      let area = 0;
+      
+      if (latlngs.length < 3) {
+        return 0;
+      }
+      
+      for (let i = 0; i < latlngs.length; i++) {
+        const j = (i + 1) % latlngs.length;
+        const p1 = latlngs[i];
+        const p2 = latlngs[j];
+        
+        // 将经纬度转换为弧度
+        const p1LatRad = p1.lat * Math.PI / 180;
+        const p1LngRad = p1.lng * Math.PI / 180;
+        const p2LatRad = p2.lat * Math.PI / 180;
+        const p2LngRad = p2.lng * Math.PI / 180;
+        
+        // 计算球面三角形面积
+        const dLng = p2LngRad - p1LngRad;
+        area += 2 * Math.atan2(
+          Math.sin(dLng) * Math.cos(p2LatRad),
+          Math.cos(p1LatRad) * Math.sin(p2LatRad) - Math.sin(p1LatRad) * Math.cos(p2LatRad) * Math.cos(dLng)
+        );
+      }
+      
+      // 取绝对值，并根据地球半径计算实际面积（平方米）
+      area = Math.abs(area * earthRadius * earthRadius);
+      
+      return Math.round(area);
+    },
+    
+    // 计算两点之间的距离（米）
+    calculateDistance(lat1, lng1, lat2, lng2) {
+      const p1 = L.latLng(lat1, lng1);
+      const p2 = L.latLng(lat2, lng2);
+      return p1.distanceTo(p2);
+    },
+    
+    // 判断点是否在多边形内
+    isPointInPolygon(point, polygon) {
+      // 实现射线法判断点是否在多边形内
+      let inside = false;
+      const x = point.lng;
+      const y = point.lat;
+      
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i].lng;
+        const yi = polygon[i].lat;
+        const xj = polygon[j].lng;
+        const yj = polygon[j].lat;
+        
+        const intersect = ((yi > y) !== (yj > y)) && 
+          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          
+        if (intersect) inside = !inside;
+      }
+      
+      return inside;
+    },
+    
+    // 只检查点是否在区域内
+    isPointInArea(lat, lng) {
+      if (!this.currentDrawnShape || !lat || !lng) return false;
+      
+      if (this.currentDrawnShape.type === 'circle') {
+        const circle = this.currentDrawnShape.layer;
+        const center = circle.getLatLng();
+        const radius = circle.getRadius();
+        
+        const distance = this.calculateDistance(
+          center.lat, center.lng,
+          lat, lng
+        );
+        
+        return distance <= radius;
+      } else if (this.currentDrawnShape.type === 'polygon') {
+        const polygon = this.currentDrawnShape.layer;
+        return this.isPointInPolygon(
+          { lat, lng },
+          polygon.getLatLngs()[0]
+        );
+      }
+      
+      return false;
+    },
+
+    // 搜索绘制区域内的数据
+    searchDrawnArea() {
+      if (!this.currentDrawnShape) return;
+      
+      // 设置加载状态
+      this.drawAnalysisLoading = true;
+      
+      // 重置分析结果
+      this.drawAnalysisResults = {
+        charging: [],
+        parking: [],
+        recommended: [],
+        population: []
+      };
+      
+      // 搜索充电站
+      if (this.chargingStations && this.chargingStations.length > 0) {
+        this.drawAnalysisResults.charging = this.chargingStations
+          .filter(item => {
+            const lat = item.lat || item.latitude;
+            const lng = item.lng || item.longitude;
+            return this.isPointInArea(lat, lng);
+          })
+          .slice(0, 20); // 限制最多20条记录
+      } else {
+        // 如果没有已加载的充电站数据，尝试通过天地图搜索
+        this.searchAreaFromTianditu('charging');
+      }
+      
+      // 搜索停车场
+      if (this.parkingLots && this.parkingLots.length > 0) {
+        this.drawAnalysisResults.parking = this.parkingLots
+          .filter(item => {
+            const lat = item.lat || item.latitude;
+            const lng = item.lng || item.longitude;
+            return this.isPointInArea(lat, lng);
+          })
+          .slice(0, 20);
+      } else {
+        // 如果没有已加载的停车场数据，尝试通过天地图搜索
+        this.searchAreaFromTianditu('parking');
+      }
+      
+      // 搜索推荐选址点
+      if (this.recommendedLocations && this.recommendedLocations.length > 0) {
+        this.drawAnalysisResults.recommended = this.recommendedLocations
+          .filter(item => {
+            return this.isPointInArea(item.latitude, item.longitude);
+          })
+          .map(item => ({
+            ...item,
+            lat: item.latitude,
+            lng: item.longitude
+          }))
+          .slice(0, 20);
+      }
+      
+      // 搜索人口分布点
+      if (this.heatmapData && this.heatmapData.length > 0) {
+        this.drawAnalysisResults.population = this.heatmapData
+          .filter(item => {
+            const coords = geoCoordMap && item && item.name ? geoCoordMap[item.name] : null;
+            if (!coords || coords.length < 2) return false;
+            return this.isPointInArea(coords[1], coords[0]);
+          })
+          .slice(0, 20);
+      }
+      
+      // 分析完成后，关闭加载状态
+      this.drawAnalysisLoading = false;
+    },
+    
+    // 从天地图搜索区域内的POI
+    searchAreaFromTianditu(type) {
+      if (!this.currentDrawnShape) return;
+      
+      const tiandituKey = this.tiandituKey;
+      let searchKeyword = '';
+      
+      if (type === 'charging') {
+        searchKeyword = '充电站';
+      } else if (type === 'parking') {
+        searchKeyword = '停车场';
+      } else {
+        return;
+      }
+      
+      // 获取区域中心点
+      let centerPoint;
+      if (this.currentDrawnShape.type === 'circle') {
+        centerPoint = this.currentDrawnShape.layer.getLatLng();
+      } else if (this.currentDrawnShape.type === 'polygon') {
+        // 计算多边形的中心点
+        const bounds = this.currentDrawnShape.layer.getBounds();
+        centerPoint = bounds.getCenter();
+      } else {
+        return;
+      }
+      
+      // 准备查询参数
+      const params = {
+        keyWord: searchKeyword,
+        mapBound: '-180,-90,180,90', // 全球范围
+        queryType: 1, // POI搜索
+        start: 0,
+        count: 20, // 限制返回结果数量
+        attributeFilter: '',
+        tk: tiandituKey
+      };
+      
+      // 构建查询URL
+      const url = `https://api.tianditu.gov.cn/search?postStr=${encodeURIComponent(JSON.stringify(params))}&type=query&tk=${tiandituKey}`;
+      
+      // 发送请求
+      axios.get(url)
+        .then(response => {
+          const data = response.data;
+          if (data && data.pois && data.pois.length > 0) {
+            // 处理返回的POI数据
+            const results = data.pois.map(poi => {
+              // 提取经纬度
+              const lonlat = poi.lonlat.split(',');
+              return {
+                id: poi.uid,
+                name: poi.name,
+                longitude: parseFloat(lonlat[0]),
+                latitude: parseFloat(lonlat[1]),
+                lng: parseFloat(lonlat[0]),
+                lat: parseFloat(lonlat[1]),
+                address: poi.address || '',
+                type: type === 'charging' ? '充电站' : '停车场',
+                source: '天地图'
+              };
+            }).filter(item => {
+              // 过滤出在绘制区域内的点
+              return this.isPointInArea(item.latitude, item.longitude);
+            }).slice(0, 20); // 限制最多20条记录
+            
+            // 更新结果
+            if (type === 'charging') {
+              this.drawAnalysisResults.charging = results;
+            } else if (type === 'parking') {
+              this.drawAnalysisResults.parking = results;
+            }
+          }
+        })
+        .catch(error => {
+          console.error(`搜索${type === 'charging' ? '充电站' : '停车场'}时出错:`, error);
+        })
+        .finally(() => {
+          this.drawAnalysisLoading = false;
+        });
+    },
+    
+    // 判断点是否在绘制的区域内
+    isPointInArea(lat, lng) {
+      if (!this.currentDrawnShape || !lat || !lng) return false;
+      
+      if (this.currentDrawnShape.type === 'circle') {
+        const circle = this.currentDrawnShape.layer;
+        const center = circle.getLatLng();
+        const radius = circle.getRadius();
+        
+        const distance = this.calculateDistance(
+          center.lat, center.lng,
+          lat, lng
+        );
+        
+        return distance <= radius;
+      } else if (this.currentDrawnShape.type === 'polygon') {
+        const polygon = this.currentDrawnShape.layer;
+        return this.isPointInPolygon(
+          { lat, lng },
+          polygon.getLatLngs()[0]
+        );
+      }
+      
+      return false;
+    },
+    locateAnalysisPoint(point) {
+      if (!point || !this.map) return;
+      
+      // 获取坐标
+      const lat = point.lat || point.latitude;
+      const lng = point.lng || point.longitude;
+      
+      if (!lat || !lng) {
+        // 如果是人口分布点，可能需要从geoCoordMap获取坐标
+        if (point.name && geoCoordMap && geoCoordMap[point.name]) {
+          const coords = geoCoordMap[point.name];
+          if (coords && coords.length >= 2) {
+            this.map.setView([coords[1], coords[0]], 16);
+            
+            // 显示临时标记
+            if (this.tempLocationMarker) {
+              this.map.removeLayer(this.tempLocationMarker);
+            }
+            
+            this.tempLocationMarker = L.circleMarker([coords[1], coords[0]], {
+              color: '#ff4500',
+              fillColor: '#ff4500',
+              fillOpacity: 0.8,
+              radius: 10,
+              weight: 2
+            }).addTo(this.map);
+            
+            // 3秒后移除标记
+            setTimeout(() => {
+              if (this.tempLocationMarker) {
+                this.map.removeLayer(this.tempLocationMarker);
+                this.tempLocationMarker = null;
+              }
+            }, 3000);
+          }
+        }
+        return;
+      }
+      
+      // 定位到点位并显示标记
+      this.map.setView([lat, lng], 16);
+      
+      // 显示临时标记
+      if (this.tempLocationMarker) {
+        this.map.removeLayer(this.tempLocationMarker);
+      }
+      
+      this.tempLocationMarker = L.circleMarker([lat, lng], {
+        color: '#ff4500',
+        fillColor: '#ff4500',
+        fillOpacity: 0.8,
+        radius: 10,
+        weight: 2
+      }).addTo(this.map);
+      
+      // 3秒后移除标记
+      setTimeout(() => {
+        if (this.tempLocationMarker) {
+          this.map.removeLayer(this.tempLocationMarker);
+          this.tempLocationMarker = null;
+        }
+      }, 3000);
+    },
+    
+    // 清除绘制分析结果
+    clearDrawAnalysis() {
+      // 关闭对话框
+      this.showDrawAnalysisDialog = false;
+      
+      // 清除绘制图层
+      if (this.drawnItems) {
+        this.drawnItems.clearLayers();
+      }
+      
+      // 重置分析结果和当前绘制形状
+      this.drawAnalysisResults = {
+        charging: [],
+        parking: [],
+        recommended: [],
+        population: []
+      };
+      
+      this.currentDrawnShape = null;
+      this.drawAnalysisRadius = 0;
+      this.drawAnalysisArea = 0;
+      
+      this.$message.success('已清除绘制分析结果');
+    },
+    // 重新搜索绘制区域
+    researchDrawnArea() {
+      this.searchDrawnArea();
+    },
+    
+    // 清除绘制区域和分析结果
+    clearDrawnArea() {
+      if (this.drawnItems) {
+        this.drawnItems.clearLayers();
+      }
+      
+      this.currentDrawnShape = null;
+      this.drawAnalysisResults = {
+        charging: [],
+        parking: [],
+        recommended: [],
+        population: []
+      };
+      
+      this.drawAnalysisRadius = 0;
+      this.drawAnalysisArea = 0;
+      
+      this.showDrawAnalysisDialog = false;
+      this.currentTool = null;
+      
+      document.getElementById('map').style.cursor = '';
+      
+      this.$message.info('已清除绘制区域和分析结果');
+    },
+  },
+  beforeUnmount() {
+    if (this.map) {
+      this.map.remove()
+    }
+  }
+}
+</script>
+
+<style>
+.layout-container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 60px;
+  background-color: #545c64;
+  color: white;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+  justify-content: space-between;
+}
+
+.logo {
+  font-size: 20px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.main-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.menu-bar {
+  width: 240px;
+  background-color: #545c64;
+  height: 100%;
+}
+
+.main-menu {
+  border-right: none;
+  height: 100%;
+}
+
+.content {
+  flex: 1;
+  position: relative;
+  display: flex;
+  height: calc(100vh - 60px); /* 减去顶部标题栏的高度 */
+  overflow: hidden;
+}
+
+#map {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+
+/* 服务分析面板样式 */
+.service-analysis {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 350px;
+  max-height: calc(100% - 20px);
+  background-color: white;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  overflow: auto;
+}
+
+/* 菜单样式优化 */
+.el-menu-item .el-checkbox {
+  width: 100%;
+  height: 100%;
+  margin-right: 0;
+  display: flex;
+  align-items: center;
+}
+
+.el-sub-menu .el-icon {
+  margin-right: 5px;
+}
+
+/* 确保图标垂直居中 */
+.el-menu-item,
+.el-sub-menu__title {
+  display: flex;
+  align-items: center;
+}
+
+/* 上传按钮样式 */
+.upload-inline {
+  display: flex;
+  align-items: center;
+}
+
+.upload-inline .el-icon {
+  margin-right: 5px;
+}
+
+/* 优化子菜单样式 */
+.el-menu--popup {
+  min-width: 200px;
+}
+
+.el-menu-item-group__title {
+  padding: 0;
+}
+
+/* 确保布局占满整个视口 */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* 添加交通路网图层的样式 */
+.traffic-popup {
+  padding: 10px;
+}
+
+.traffic-popup p {
+  margin: 5px 0;
+}
+
+.poi-popup {
+  padding: 8px;
+}
+
+.poi-popup p {
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+/* 添加自定义弹出窗口样式 */
+.custom-popup {
+  margin: 0;
+  padding: 0;
+}
+
+.custom-popup .leaflet-popup-content-wrapper {
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.custom-popup .leaflet-popup-content {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.custom-popup .leaflet-popup-tip-container {
+  margin-top: -1px;
+}
+
+/* 图层菜单项样式 */
+.layer-menu-item {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding-right: 16px !important;
+  height: 40px !important;
+}
+
+.layer-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+
+.layer-name {
+  flex: 1;
+  margin: 0 8px;
+}
+
+.layer-checkbox {
+  margin-left: auto !important;
+}
+
+/* 确保图标垂直居中 */
+.el-menu-item .el-icon,
+.el-menu-item img {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* 调整复选框样式 */
+.el-checkbox {
+  margin-right: 0 !important;
+}
+
+.el-checkbox__inner {
+  border-color: #909399;
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #ffd04b;
+  border-color: #ffd04b;
+}
+
+/* 调整子菜单样式 */
+.el-menu-item-group__title {
+  padding: 0;
+}
+
+.el-menu-item {
+  min-width: 200px;
+}
+
+/* 人口分布点的样式 */
+.population-marker {
+  border-radius: 50%;
+  border: 1px solid white;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.population-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 70%);
+}
+
+.search-container {
+  width: 300px;
+}
+
+.search-input {
+  width: 100%;
+}
+
+.search-input .el-input__wrapper {
+  background-color: #fff;
+  border-radius: 4px;
+}
+
+.search-input .el-input__inner {
+  color: #333;
+}
+
+.search-input .el-input__prefix {
+  color: #909399;
+}
+
+.service-range-dialog {
+  padding: 10px;
+}
+
+.dialog-section {
+  margin-bottom: 16px;
+}
+
+.dialog-section h4 {
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.radius-control {
+  padding: 8px 0;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  gap: 8px;
+}
+
+.point-selection {
+  margin-top: 12px;
+}
+
+.manual-points {
+  margin-top: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.point-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.point-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.point-item:last-child {
+  border-bottom: none;
+}
+
+.point-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.manual-point-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 修改弹出框样式 */
+.el-dialog__header {
+  padding: 16px 20px;
+  background-color: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.el-dialog__body {
+  padding: 20px;
+}
+
+.el-dialog__footer {
+  padding: 12px 20px;
+  border-top: 1px solid #ebeef5;
+}
+
+.import-dialog {
+  padding: 20px;
+}
+
+.import-options {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.file-import-form, .map-import-info {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.file-import-form h4, .map-import-info h4 {
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.data-type-selector {
+  margin-top: 10px;
+}
+
+.upload-box {
+  margin-top: 10px;
+}
+
+.map-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+}
+
+.import-test-btn {
+  background-color: #409eff;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.import-test-btn:hover {
+  background-color: #66b1ff;
+}
+
+.import-confirm-dialog {
+  padding: 0;
+}
+
+.import-confirm-dialog p {
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: #303133;
+}
+
+.import-confirm-dialog p strong {
+  font-weight: bold;
+  color: #409EFF;
+}
+
+.import-confirm-dialog .el-table {
+  margin: 15px 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.import-confirm-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* 缓冲区弹出窗口样式 */
+.buffer-popup {
+  padding: 8px;
+}
+
+.buffer-popup h3 {
+  margin: 0 0 8px 0;
+  color: #ffd04b;
+  font-weight: bold;
+}
+
+.buffer-popup p {
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+/* 绘制分析对话框样式 */
+.draw-analysis-dialog .analysis-summary {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+}
+
+.draw-analysis-dialog .shape-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.draw-analysis-dialog .shape-info h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #303133;
+}
+
+.draw-analysis-dialog .shape-info p {
+  margin: 5px 0;
+  color: #606266;
+}
+
+.draw-analysis-dialog .empty-data {
+  padding: 40px 0;
+}
+
+.draw-analysis-dialog .recommend-score {
+  font-weight: bold;
+  color: #409EFF;
+}
+
+.draw-analysis-dialog .el-tabs__content {
+  padding: 15px;
+}
+
+.draw-analysis-dialog h4 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #303133;
+}
+
+/* 临时定位标记的弹出窗口样式 */
+.poi-popup {
+  padding: 5px;
+}
+
+.poi-popup h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 16px;
+  color: #303133;
+}
+
+.poi-popup p {
+  margin: 5px 0;
+  color: #606266;
+}
+</style> 
